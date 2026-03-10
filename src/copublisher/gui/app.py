@@ -14,19 +14,7 @@ from typing import Optional, Tuple, List
 
 import gradio as gr
 
-from ..core import (
-    Platform,
-    EpisodeAdapter,
-    WeChatPublisher,
-    YouTubePublisher,
-    MediumPublisher,
-    TwitterPublisher,
-    DevToPublisher,
-    TikTokPublisher,
-    InstagramPublisher,
-    WeChatPublishTask,
-    YouTubePublishTask,
-)
+from ..application.usecases.publish_content import PublishContentUseCase
 
 
 class PublisherApp:
@@ -35,9 +23,8 @@ class PublisherApp:
     def __init__(self):
         self.logs = []
         self.is_publishing = False
-        self.wechat_publisher = None
-        self.youtube_publisher = None
-        self.current_adapter: Optional[EpisodeAdapter] = None
+        self.publish_usecase = PublishContentUseCase(log_callback=self.add_log)
+        self.current_episode_path: Optional[Path] = None
     
     def add_log(self, message: str):
         """添加日志"""
@@ -55,15 +42,14 @@ class PublisherApp:
     
     def close_browser(self) -> str:
         """关闭微信浏览器"""
-        if self.wechat_publisher:
-            try:
-                self.wechat_publisher.close()
+        try:
+            closed = self.publish_usecase.close_wechat_browser()
+            if closed:
                 self.add_log("[INFO] 微信浏览器已关闭")
-                self.wechat_publisher = None
-            except Exception as e:
-                self.add_log(f"[ERROR] 关闭浏览器失败: {e}")
-        else:
-            self.add_log("[WARNING] 没有打开的微信浏览器")
+            else:
+                self.add_log("[WARNING] 没有打开的微信浏览器")
+        except Exception as e:
+            self.add_log(f"[ERROR] 关闭浏览器失败: {e}")
         return self.get_logs()
     
     # ============================================================
@@ -82,33 +68,17 @@ class PublisherApp:
         
         try:
             ep_path = Path(ep_file.name if hasattr(ep_file, 'name') else ep_file)
-            self.current_adapter = EpisodeAdapter(ep_path)
-            
-            # 构建摘要
-            adapter = self.current_adapter
-            platforms = adapter.get_available_platforms()
-            ready = [
-                p for p, info in platforms.items()
-                if info['has_content'] and info['has_config']
-            ]
-            
-            summary = (
-                f"系列: {adapter.series_info.get('series_name', '未知')}\n"
-                f"集数: 第 {adapter.episode_number} 集\n"
-                f"标题: {adapter.meta.get('title', '未知')}\n"
-                f"可发布平台: {', '.join(ready)}"
+            summary, preview = self.publish_usecase.load_episode_overview(
+                episode_path=ep_path
             )
-            
-            # 文章预览 (overseas_blog 前 500 字符)
-            blog_text = adapter.content.get('overseas_blog', {}).get('text', '')
-            preview = blog_text[:500] + "..." if len(blog_text) > 500 else blog_text
+            self.current_episode_path = ep_path
             
             self.add_log(f"[INFO] 已加载: {ep_path.name}")
             
             return summary, preview
             
         except Exception as e:
-            self.current_adapter = None
+            self.current_episode_path = None
             return f"加载失败: {e}", ""
     
     def publish_episode(
@@ -132,7 +102,7 @@ class PublisherApp:
             yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
             return
         
-        if not self.current_adapter:
+        if not self.current_episode_path:
             if ep_file is None:
                 self.add_log("[ERROR] 请先加载 ep*.json 文件")
                 yield self.get_logs()
@@ -140,7 +110,8 @@ class PublisherApp:
             # 尝试重新加载
             try:
                 ep_path = Path(ep_file.name if hasattr(ep_file, 'name') else ep_file)
-                self.current_adapter = EpisodeAdapter(ep_path)
+                self.publish_usecase.load_episode_overview(episode_path=ep_path)
+                self.current_episode_path = ep_path
             except Exception as e:
                 self.add_log(f"[ERROR] 加载 ep*.json 失败: {e}")
                 yield self.get_logs()
@@ -168,9 +139,15 @@ class PublisherApp:
         
         self.is_publishing = True
         self.clear_logs()
-        adapter = self.current_adapter
+        episode_path = self.current_episode_path
+        if episode_path is None:
+            self.add_log("[ERROR] 未加载 episode 路径")
+            self.is_publishing = False
+            yield self.get_logs()
+            return
+        episode_id_for_log = episode_path.stem if episode_path else "unknown"
         self.add_log(
-            f"[INFO] 开始发布 EP{adapter.episode_number:02d} "
+            f"[INFO] 开始发布 {episode_id_for_log} "
             f"到 {', '.join(selected_platforms)}"
         )
         yield self.get_logs()
@@ -180,7 +157,7 @@ class PublisherApp:
         
         def run_publish():
             try:
-                self._do_episode_publish(adapter, selected_platforms, video_path)
+                self._do_episode_publish(episode_path, selected_platforms, video_path)
             except Exception as e:
                 self.add_log(f"[ERROR] 发布异常: {e}")
                 import traceback
@@ -201,84 +178,19 @@ class PublisherApp:
     
     def _do_episode_publish(
         self,
-        adapter: EpisodeAdapter,
+        episode_path: Path,
         platforms: List[str],
         video_path: Optional[Path],
     ):
         """实际执行 Episode 发布逻辑"""
-        results = {}
-        
-        for platform in platforms:
-            self.add_log(f"\n{'='*50}")
-            self.add_log(f"[INFO] 发布到 {platform.upper()}")
-            self.add_log(f"{'='*50}")
-            
-            try:
-                if platform == "medium":
-                    task = adapter.to_medium_task()
-                    self.add_log(f"[INFO] 标题: {task.title}")
-                    self.add_log(f"[INFO] 标签: {', '.join(task.tags)}")
-                    with MediumPublisher(log_callback=self.add_log) as pub:
-                        success, url = pub.publish(task)
-                    results[platform] = (success, url)
-                    
-                elif platform == "twitter":
-                    task = adapter.to_twitter_task()
-                    self.add_log(f"[INFO] Thread: {len(task.tweets)} 条推文")
-                    with TwitterPublisher(log_callback=self.add_log) as pub:
-                        success, url = pub.publish(task)
-                    results[platform] = (success, url)
-                    
-                elif platform == "devto":
-                    task = adapter.to_devto_task()
-                    self.add_log(f"[INFO] 标题: {task.title}")
-                    self.add_log(f"[INFO] 标签: {', '.join(task.tags)}")
-                    with DevToPublisher(log_callback=self.add_log) as pub:
-                        success, url = pub.publish(task)
-                    results[platform] = (success, url)
-                    
-                elif platform == "tiktok":
-                    task = adapter.to_tiktok_task(video_path)
-                    with TikTokPublisher(log_callback=self.add_log) as pub:
-                        success, url = pub.publish(task)
-                    results[platform] = (success, url)
-                    
-                elif platform == "instagram":
-                    task = adapter.to_instagram_task(video_path)
-                    with InstagramPublisher(log_callback=self.add_log) as pub:
-                        success, url = pub.publish(task)
-                    results[platform] = (success, url)
-                    
-                elif platform == "youtube":
-                    task = adapter.to_youtube_task(video_path)
-                    pub = YouTubePublisher(log_callback=self.add_log)
-                    with pub:
-                        success, url = pub.publish(task)
-                    results[platform] = (success, url)
-                    
-                elif platform == "wechat":
-                    task = adapter.to_wechat_task(video_path)
-                    self.wechat_publisher = WeChatPublisher(
-                        headless=False,
-                        log_callback=self.add_log,
-                        account=getattr(self, '_current_account', None),
-                    )
-                    self.wechat_publisher.start()
-                    self.wechat_publisher.authenticate()
-                    success, msg = self.wechat_publisher.publish(task)
-                    results[platform] = (success, msg)
-                    if success:
-                        self.add_log(
-                            "[INFO] 请在浏览器中确认发布，"
-                            "然后点击「已完成发布」按钮"
-                        )
-                        
-            except FileNotFoundError as e:
-                self.add_log(f"[ERROR] {platform}: 凭据文件未找到 - {e}")
-                results[platform] = (False, str(e))
-            except Exception as e:
-                self.add_log(f"[ERROR] {platform}: {e}")
-                results[platform] = (False, str(e))
+        results = self.publish_usecase.run_episode_adapter(
+            episode_path=episode_path,
+            platforms=platforms,
+            video_path=video_path,
+            privacy="private",
+            account=getattr(self, "_current_account", None),
+            keep_wechat_browser_open=True,
+        )
         
         # 汇总
         self.add_log(f"\n{'='*50}")
@@ -386,31 +298,45 @@ class PublisherApp:
             video_path = Path(
                 video_file.name if hasattr(video_file, 'name') else video_file
             )
-            
-            if platform in ["wechat", "both"]:
-                self.add_log("\n" + "="*50)
-                self.add_log("[INFO] 发布到微信视频号")
-                self.add_log("="*50)
-                yield self.get_logs()
-                
-                for _ in self._publish_to_wechat_stream(
-                    video_path, wechat_title, wechat_description,
-                    wechat_hashtags, wechat_heji, wechat_huodong,
-                    account=wechat_account,
-                ):
-                    yield self.get_logs()
-            
-            if platform in ["youtube", "both"]:
-                self.add_log("\n" + "="*50)
-                self.add_log("[INFO] 发布到 YouTube Shorts")
-                self.add_log("="*50)
-                yield self.get_logs()
-                
-                for _ in self._publish_to_youtube_stream(
-                    video_path, youtube_title, youtube_description,
-                    youtube_tags, youtube_playlist, youtube_privacy
-                ):
-                    yield self.get_logs()
+            hashtags_list = [
+                tag.strip() for tag in (wechat_hashtags or "").split() if tag.strip()
+            ]
+            youtube_tags_list = [
+                tag.strip() for tag in (youtube_tags or "").split(",") if tag.strip()
+            ]
+            script_data = {
+                "wechat": {
+                    "title": (wechat_title or "").strip(),
+                    "description": (wechat_description or "").strip(),
+                    "hashtags": hashtags_list,
+                    "heji": (wechat_heji or "").strip(),
+                    "huodong": (wechat_huodong or "").strip(),
+                },
+                "youtube": {
+                    "title": (youtube_title or "").strip(),
+                    "description": (youtube_description or "").strip(),
+                    "tags": youtube_tags_list,
+                    "playlists": (youtube_playlist or "").strip(),
+                    "privacy": youtube_privacy,
+                },
+            }
+
+            results = self.publish_usecase.run_legacy_script(
+                video_path=video_path,
+                script_data=script_data,
+                platform=platform,
+                privacy=youtube_privacy,
+                account=wechat_account.strip() or None,
+                keep_wechat_browser_open=platform in ["wechat", "both"],
+            )
+
+            self.add_log("\n" + "=" * 50)
+            self.add_log("[INFO] 发布结果汇总")
+            self.add_log("=" * 50)
+            for platform_name, (success, detail) in results.items():
+                status = "✅" if success else "❌"
+                self.add_log(f"  {status} {platform_name}: {detail or '(无详情)'}")
+            yield self.get_logs()
             
         except Exception as e:
             self.add_log(f"[ERROR] 发布失败: {e}")
@@ -421,140 +347,6 @@ class PublisherApp:
             self.is_publishing = False
         
         yield self.get_logs()
-    
-    def _publish_to_wechat_stream(
-        self, video_path: Path, title: str, description: str,
-        hashtags: str, heji: str, huodong: str,
-        account: str = "",
-    ):
-        """发布到微信视频号（流式版本）"""
-        try:
-            hashtag_list = []
-            if hashtags.strip():
-                hashtag_list = [
-                    tag.strip() for tag in hashtags.split() if tag.strip()
-                ]
-            
-            account = account.strip() or None
-            
-            task = WeChatPublishTask(
-                video_path=video_path,
-                title=title.strip(),
-                description=description.strip(),
-                hashtags=hashtag_list,
-                heji=heji.strip(),
-                huodong=huodong.strip(),
-            )
-            
-            self.add_log(f"[INFO] 视频文件: {video_path.name}")
-            self.add_log(f"[INFO] 标题: {task.title or '(未设置)'}")
-            if account:
-                self.add_log(f"[INFO] 账号: {account}")
-            yield
-            
-            self.wechat_publisher = WeChatPublisher(
-                headless=False,
-                debug=False,
-                log_callback=self.add_log,
-                account=account,
-            )
-            self.wechat_publisher.start()
-            yield
-            
-            self.wechat_publisher.authenticate()
-            yield
-            
-            success, message = self.wechat_publisher.publish(task)
-            yield
-            
-            if success:
-                self.add_log(
-                    "[INFO] ✅ 微信视频号发布流程完成！"
-                    "请在浏览器中确认发布。"
-                )
-                self.add_log(
-                    "[INFO] 💡 确认发布后，点击「已完成发布」按钮。"
-                )
-            else:
-                self.add_log(f"[ERROR] 微信视频号发布失败: {message}")
-            yield
-            
-        except Exception as e:
-            self.add_log(f"[ERROR] 微信视频号发布失败: {e}")
-            yield
-    
-    def _publish_to_youtube_stream(
-        self, video_path: Path, title: str, description: str,
-        tags: str, playlist: str, privacy: str
-    ):
-        """发布到 YouTube（流式版本）"""
-        operation_done = threading.Event()
-        
-        def run_publish():
-            try:
-                self._publish_to_youtube(
-                    video_path, title, description, tags, playlist, privacy
-                )
-            except Exception as e:
-                self.add_log(f"[ERROR] YouTube 发布异常: {e}")
-            finally:
-                operation_done.set()
-        
-        thread = threading.Thread(target=run_publish, daemon=True)
-        thread.start()
-        
-        while not operation_done.is_set():
-            yield
-            time.sleep(0.3)
-        
-        thread.join(timeout=1.0)
-        yield
-    
-    def _publish_to_youtube(
-        self, video_path: Path, title: str, description: str,
-        tags: str, playlist: str, privacy: str
-    ):
-        """发布到YouTube"""
-        try:
-            tags_list = []
-            if tags and tags.strip():
-                tags_list = [tag.strip() for tag in tags.split(',') if tag.strip()]
-            
-            title = title or ""
-            description = description or ""
-            playlist = playlist or ""
-            
-            task = YouTubePublishTask(
-                video_path=video_path,
-                title=title.strip(),
-                description=description.strip(),
-                tags=tags_list,
-                privacy_status=privacy,
-                made_for_kids=False,
-                playlist_title=playlist.strip() if playlist.strip() else None
-            )
-            
-            self.add_log(f"[INFO] 视频文件: {video_path.name}")
-            self.add_log(f"[INFO] 标题: {task.title}")
-            self.add_log(f"[INFO] 隐私设置: {task.privacy_status}")
-            
-            self.youtube_publisher = YouTubePublisher(
-                log_callback=self.add_log
-            )
-            
-            with self.youtube_publisher:
-                success, video_url = self.youtube_publisher.publish(task)
-                
-                if success:
-                    self.add_log(f"[INFO] ✅ YouTube Shorts 上传成功！")
-                    self.add_log(f"[INFO] 视频链接: {video_url}")
-                else:
-                    self.add_log(f"[ERROR] YouTube 上传失败")
-            
-        except FileNotFoundError as e:
-            self.add_log(f"[ERROR] YouTube 认证文件未找到: {e}")
-        except Exception as e:
-            self.add_log(f"[ERROR] YouTube 发布失败: {e}")
 
 
 def create_app() -> gr.Blocks:
