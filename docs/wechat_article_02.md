@@ -33,7 +33,7 @@ AI问了几个问题：
 AI重新设计了一下代码结构：
 
 ```
-media-publisher/
+copublisher/
 ├── wechat.py      # 微信发布
 ├── youtube.py     # YouTube发布（新加的）
 ├── base.py        # 公共代码

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 class ImportSideEffectsTests(unittest.TestCase):
-    def test_import_media_publisher_does_not_mutate_proxy_env(self):
+    def test_import_copublisher_does_not_mutate_proxy_env(self):
         repo_root = Path(__file__).resolve().parents[1]
         src_dir = repo_root / "src"
         env = os.environ.copy()
@@ -17,7 +17,7 @@ class ImportSideEffectsTests(unittest.TestCase):
         code = (
             "import os, sys;"
             f"sys.path.insert(0, {str(src_dir)!r});"
-            "import media_publisher;"
+            "import copublisher;"
             "print((os.environ.get('HTTP_PROXY'), os.environ.get('HTTPS_PROXY')))"
         )
         result = subprocess.run(
@@ -29,7 +29,7 @@ class ImportSideEffectsTests(unittest.TestCase):
         )
         self.assertIn("(None, None)", result.stdout.strip())
 
-    def test_import_media_publisher_core_does_not_mutate_proxy_env(self):
+    def test_import_copublisher_core_does_not_mutate_proxy_env(self):
         repo_root = Path(__file__).resolve().parents[1]
         src_dir = repo_root / "src"
         env = os.environ.copy()
@@ -40,7 +40,7 @@ class ImportSideEffectsTests(unittest.TestCase):
         code = (
             "import os, sys;"
             f"sys.path.insert(0, {str(src_dir)!r});"
-            "import media_publisher.core;"
+            "import copublisher.core;"
             "print((os.environ.get('HTTP_PROXY'), os.environ.get('HTTPS_PROXY')))"
         )
         result = subprocess.run(

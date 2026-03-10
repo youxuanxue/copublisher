@@ -16,11 +16,11 @@ dependencies = [
 ]
 
 [project.scripts]
-copublisher = "media_publisher.__main__:main"
+copublisher = "copublisher.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/media_publisher"]
+packages = ["src/copublisher"]

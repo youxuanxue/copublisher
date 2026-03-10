@@ -1,12 +1,12 @@
 # 使用示例
 
-本目录包含使用 media-publisher 的各种示例代码。
+本目录包含使用 copublisher 的各种示例代码。
 
 ## 示例列表
 
 ### publish_lesson_example.py
 
-演示如何在主项目中使用 media-publisher 发布课程视频。
+演示如何在主项目中使用 copublisher 发布课程视频。
 
 **用法:**
 
@@ -38,10 +38,10 @@ python examples/publish_lesson_example.py book_sunzibingfa/lesson02 --platform w
 
 ### 1. 准备工作
 
-确保已安装 media-publisher:
+确保已安装 copublisher:
 
 ```bash
-cd media-publisher
+cd copublisher
 uv pip install -e .
 ```
 
@@ -98,7 +98,7 @@ series/
 
 ```bash
 # 从项目根目录运行
-python media-publisher/examples/publish_lesson_example.py book_sunzibingfa/lesson02 --platform both
+python copublisher/examples/publish_lesson_example.py book_sunzibingfa/lesson02 --platform both
 ```
 
 ## 自定义示例
@@ -106,8 +106,8 @@ python media-publisher/examples/publish_lesson_example.py book_sunzibingfa/lesso
 你可以基于这些示例创建自己的发布脚本:
 
 ```python
-from media_publisher import WeChatPublisher, YouTubePublisher
-from media_publisher import WeChatPublishTask, YouTubePublishTask
+from copublisher import WeChatPublisher, YouTubePublisher
+from copublisher import WeChatPublishTask, YouTubePublishTask
 from pathlib import Path
 
 # 创建任务

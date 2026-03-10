@@ -1,5 +1,5 @@
 """
-验证 media-publisher 模块安装和导入
+验证 copublisher 模块安装和导入
 
 用法:
     python verify_install.py
@@ -10,7 +10,7 @@ from pathlib import Path
 
 def main():
     print("="*60)
-    print("验证 media-publisher 模块")
+    print("验证 copublisher 模块")
     print("="*60)
     print()
     
@@ -26,7 +26,7 @@ def main():
     
     # 2. 检查模块结构
     print("2️⃣  检查模块结构...")
-    module_root = Path(__file__).parent / "src" / "media_publisher"
+    module_root = Path(__file__).parent / "src" / "copublisher"
     
     required_files = [
         "__init__.py",
@@ -58,7 +58,7 @@ def main():
     try:
         sys.path.insert(0, str(module_root.parent))
         
-        from media_publisher import (
+        from copublisher import (
             Platform,
             Publisher,
             PublishTask,
@@ -70,7 +70,7 @@ def main():
         print("   ✅ 成功导入所有核心类")
         
         # 显示版本信息
-        from media_publisher import __version__
+        from copublisher import __version__
         print(f"   📦 版本: {__version__}")
     except ImportError as e:
         print(f"   ❌ 导入失败: {e}")
@@ -105,18 +105,18 @@ def main():
     # 5. 总结
     print("="*60)
     if not missing_deps:
-        print("✅ 所有检查通过！media-publisher 已准备就绪")
+        print("✅ 所有检查通过！copublisher 已准备就绪")
         print()
         print("下一步:")
-        print("  • 使用 GUI: python -m media_publisher")
-        print("  • 命令行: python -m media_publisher --video video.mp4 --script script.json")
+        print("  • 使用 GUI: python -m copublisher")
+        print("  • 命令行: python -m copublisher --video video.mp4 --script script.json")
         print("  • 查看示例: python examples/publish_lesson_example.py --help")
         return True
     else:
         print("⚠️  部分依赖缺失，请先安装依赖")
         print()
         print("安装方法:")
-        print("  1. cd media-publisher")
+        print("  1. cd copublisher")
         print("  2. uv pip install -e .")
         return False
 

@@ -9,7 +9,7 @@ import os
 import socket
 from pathlib import Path
 from typing import Optional, Callable, Tuple
-from media_publisher.shared.io import atomic_write_text
+from copublisher.shared.io import atomic_write_text
 
 DEFAULT_PROXY_HOST = "127.0.0.1"
 DEFAULT_PROXY_PORT = 7890
@@ -152,7 +152,7 @@ class YouTubePublisher(Publisher):
         possible_paths = [
             Path(config_path),  # 当前目录
             Path.cwd() / config_path,  # 工作目录
-            Path.cwd().parent / config_path,  # 父目录（media-publisher 的父目录）
+            Path.cwd().parent / config_path,  # 父目录（copublisher 的父目录）
         ]
         
         for path in possible_paths:

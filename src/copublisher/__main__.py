@@ -15,8 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from media_publisher.shared.io import atomic_write_text
-from media_publisher.shared.security import sanitize_identifier
+from copublisher.shared.io import atomic_write_text
+from copublisher.shared.security import sanitize_identifier
 
 
 # 所有支持的平台

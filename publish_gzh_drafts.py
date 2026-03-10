@@ -18,8 +18,8 @@ from bs4 import BeautifulSoup
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
-from media_publisher.core.browser import PlaywrightBrowser
-from media_publisher.core.gzh import authenticate_gzh
+from copublisher.core.browser import PlaywrightBrowser
+from copublisher.core.gzh import authenticate_gzh
 
 
 # ─────────────────────────────────────────────

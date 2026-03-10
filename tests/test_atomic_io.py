@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from media_publisher.shared.io import atomic_write_json, atomic_write_text
+from copublisher.shared.io import atomic_write_json, atomic_write_text
 
 
 class AtomicIoTests(unittest.TestCase):

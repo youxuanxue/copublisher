@@ -1,7 +1,7 @@
 """
 课程视频发布示例
 
-演示如何使用 media-publisher 模块发布课程视频到多个平台。
+演示如何使用 copublisher 模块发布课程视频到多个平台。
 
 用法:
     python examples/publish_lesson_example.py book_sunzibingfa/lesson02 --platform both
@@ -12,10 +12,10 @@ import argparse
 import json
 from pathlib import Path
 
-# 添加 media-publisher 到路径
+# 添加 copublisher 到路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from media_publisher import (
+from copublisher import (
     WeChatPublisher,
     YouTubePublisher,
     WeChatPublishTask,

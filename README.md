@@ -53,7 +53,7 @@ python verify_install.py
 copublisher
 
 # 或使用 Python 模块
-python -m media_publisher
+python -m copublisher
 
 # 指定端口
 copublisher --port 8080
@@ -83,7 +83,7 @@ copublisher --video /path/to/video.mp4 --platform youtube --privacy public --scr
 ### 方式 3: Python 代码
 
 ```python
-from media_publisher import (
+from copublisher import (
     WeChatPublisher,
     YouTubePublisher,
     WeChatPublishTask,
@@ -152,7 +152,7 @@ with YouTubePublisher() as publisher:
 登录状态保存在用户主目录下：
 
 ```
-~/.media-publisher/wechat_auth.json
+~/.copublisher/wechat_auth.json
 ```
 
 首次使用需要扫码登录，之后会自动使用保存的登录状态。
@@ -174,7 +174,7 @@ copublisher/
 ├── README.md                   # 说明文档
 ├── verify_install.py           # 安装验证脚本
 ├── src/
-│   └── media_publisher/
+│   └── copublisher/
 │       ├── __init__.py         # 模块入口
 │       ├── __main__.py         # 命令行入口
 │       ├── core/
@@ -201,7 +201,7 @@ uv pip install -e .
 ### 导入使用
 
 ```python
-from media_publisher import (
+from copublisher import (
     Platform,
     WeChatPublisher,
     YouTubePublisher,
@@ -220,8 +220,8 @@ from media_publisher import (
 # from src.publish.youtube_publisher import YouTubePublisher, YouTubePublishTask
 
 # 新的导入
-from media_publisher import WeChatPublisher, WeChatPublishTask
-from media_publisher import YouTubePublisher, YouTubePublishTask
+from copublisher import WeChatPublisher, WeChatPublishTask
+from copublisher import YouTubePublisher, YouTubePublishTask
 ```
 
 类名变更：
@@ -234,7 +234,7 @@ from media_publisher import YouTubePublisher, YouTubePublishTask
 ### 导入错误
 
 ```
-ModuleNotFoundError: No module named 'media_publisher'
+ModuleNotFoundError: No module named 'copublisher'
 ```
 
 **解决**: 确保已安装模块：

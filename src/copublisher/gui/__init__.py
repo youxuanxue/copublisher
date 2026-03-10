@@ -5,7 +5,7 @@ from importlib import import_module
 
 def __getattr__(name):
     if name in {"create_app", "launch_app"}:
-        module = import_module("media_publisher.gui.app")
+        module = import_module("copublisher.gui.app")
         value = getattr(module, name)
         globals()[name] = value
         return value

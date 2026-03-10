@@ -4,7 +4,7 @@ import unittest
 from argparse import Namespace
 from pathlib import Path
 
-from media_publisher.__main__ import run_job_cli
+from copublisher.__main__ import run_job_cli
 
 
 class JobCliTests(unittest.TestCase):

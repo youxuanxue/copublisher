@@ -16,8 +16,8 @@ from playwright.sync_api import (
     Playwright,
     Browser,
 )
-from media_publisher.shared.io import atomic_write_json
-from media_publisher.shared.security import sanitize_identifier
+from copublisher.shared.io import atomic_write_json
+from copublisher.shared.security import sanitize_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ class PlaywrightBrowser:
     各平台发布器通过组合本类来复用浏览器管理基础设施。
 
     认证文件路径规则:
-        - user_name 为 None 时: ~/.media-publisher/{platform}_auth.json（向后兼容）
-        - user_name 存在时:   ~/.media-publisher/{user_name}/{platform}_auth.json
+        - user_name 为 None 时: ~/.copublisher/{platform}_auth.json（向后兼容）
+        - user_name 存在时:   ~/.copublisher/{user_name}/{platform}_auth.json
     """
 
     def __init__(
@@ -78,7 +78,7 @@ class PlaywrightBrowser:
         Returns:
             认证文件的完整路径
         """
-        base = Path.home() / ".media-publisher"
+        base = Path.home() / ".copublisher"
         safe_user_name = sanitize_identifier(self.user_name, field_name="user_name")
         if safe_user_name:
             auth_dir = base / safe_user_name

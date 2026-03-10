@@ -14,8 +14,8 @@ from typing import Optional, Callable, List, Tuple
 from playwright.sync_api import sync_playwright, Page, BrowserContext, Playwright
 
 from .base import Publisher, WeChatPublishTask
-from media_publisher.shared.io import atomic_write_json
-from media_publisher.shared.security import sanitize_identifier
+from copublisher.shared.io import atomic_write_json
+from copublisher.shared.security import sanitize_identifier
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ def get_auth_file_path(account: Optional[str] = None) -> Path:
     Args:
         account: 账号名称。指定后认证文件按账号隔离，如 wechat_auth_奶奶讲故事.json
     """
-    auth_dir = Path.home() / ".media-publisher"
+    auth_dir = Path.home() / ".copublisher"
     auth_dir.mkdir(parents=True, exist_ok=True)
     safe_account = sanitize_identifier(account, field_name="account")
     if safe_account:

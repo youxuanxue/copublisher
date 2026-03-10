@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
 
-from media_publisher.core.browser import PlaywrightBrowser
-from media_publisher.core.wechat import get_auth_file_path
-from media_publisher.shared.security import sanitize_identifier
+from copublisher.core.browser import PlaywrightBrowser
+from copublisher.core.wechat import get_auth_file_path
+from copublisher.shared.security import sanitize_identifier
 
 
 class SecurityValidationTests(unittest.TestCase):
