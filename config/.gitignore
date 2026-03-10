@@ -1,0 +1,4 @@
+# Keep this directory while excluding real credentials/tokens.
+*
+!.gitignore
+!*.example
