@@ -8,10 +8,13 @@ def sanitize_identifier(value: str | None, field_name: str = "identifier") -> st
     """
     Validate identifier used in file-path composition.
 
-    Rules:
-    - allow only ASCII letters/digits/_/-
-    - length 1..64
-    - reject path traversal and separators (`..`, `/`, `\\`)
+    Rules applied:
+    - reject path traversal markers (``..``) and separators (``/``, ``\\``)
+    - max length 64 characters
+    - reject literal dot-path markers (``.``, ``..``)
+
+    Non-ASCII characters (e.g. Chinese account names like "奶奶讲故事")
+    are intentionally allowed.
     """
     if value is None:
         return None

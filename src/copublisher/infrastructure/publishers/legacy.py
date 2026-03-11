@@ -1,18 +1,40 @@
 """
-Legacy platform adapters implementing PublisherPort.
+Generic publisher adapter implementing PublisherPort.
+
+Replaces 7 per-platform boilerplate classes with a single reusable template.
 """
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Callable, Any
 
 from copublisher.domain.error_codes import ErrorCode, get_policy, map_exception_to_error_code
 from copublisher.domain.result import PlatformRunOutcome
 
 
-class LegacyWeChatPublisherAdapter:
-    platform = "wechat"
+class GenericPublisherAdapter:
+    """
+    Unified adapter that maps (video_path, script_data, privacy, account)
+    to a core Publisher's ``publish()`` call and wraps the result in
+    ``PlatformRunOutcome``.
+
+    Each platform instance is created by passing:
+      - ``platform``: lowercase platform key
+      - ``task_factory``: ``(video_path, script_data, privacy, account) -> task``
+      - ``publisher_factory``: ``(log_callback, account) -> Publisher``
+    """
+
+    def __init__(
+        self,
+        platform: str,
+        task_factory: Callable[..., Any],
+        publisher_factory: Callable[..., Any],
+    ):
+        self.platform = platform
+        self._task_factory = task_factory
+        self._publisher_factory = publisher_factory
 
     def publish(
         self,
@@ -22,20 +44,23 @@ class LegacyWeChatPublisherAdapter:
         privacy: str,
         account: str | None,
     ) -> PlatformRunOutcome:
-        from copublisher.core import WeChatPublishTask, WeChatPublisher
-
         started = time.perf_counter()
         try:
-            task = WeChatPublishTask.from_json(video_path, script_data)
-            with WeChatPublisher(headless=False, account=account) as publisher:
-                publisher.authenticate()
-                success, message = publisher.publish(task)
+            task = self._task_factory(
+                video_path=video_path,
+                script_data=script_data,
+                privacy=privacy,
+                account=account,
+            )
+            with self._publisher_factory(account=account) as publisher:
+                success, detail = publisher.publish(task)
+
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             if success:
                 return PlatformRunOutcome(
                     platform=self.platform,
                     success=True,
-                    message=message or "",
+                    message=detail or "",
                     duration_ms=elapsed_ms,
                 )
 
@@ -44,7 +69,7 @@ class LegacyWeChatPublisherAdapter:
             return PlatformRunOutcome(
                 platform=self.platform,
                 success=False,
-                message=message or "wechat publish failed",
+                message=detail or f"{self.platform} publish failed",
                 error_code=code,
                 retryable=policy.retryable,
                 manual_takeover_required=policy.manual_takeover_required,
@@ -65,325 +90,132 @@ class LegacyWeChatPublisherAdapter:
             )
 
 
-class LegacyYouTubePublisherAdapter:
-    platform = "youtube"
+# ── Per-platform task factories ──────────────────────────────────────
 
-    def publish(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-        account: str | None,
-    ) -> PlatformRunOutcome:
-        from copublisher.core import YouTubePublishTask, YouTubePublisher
-
-        del account
-        started = time.perf_counter()
-        try:
-            task = YouTubePublishTask.from_json(video_path, script_data)
-            task.privacy_status = privacy
-            with YouTubePublisher() as publisher:
-                success, video_url = publisher.publish(task)
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if success:
-                return PlatformRunOutcome(
-                    platform=self.platform,
-                    success=True,
-                    message=video_url or "",
-                    duration_ms=elapsed_ms,
-                )
-
-            code = ErrorCode.MP_PLATFORM_ERROR
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message="youtube publish failed",
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            code = map_exception_to_error_code(exc)
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=str(exc),
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
+def _wechat_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import WeChatPublishTask
+    return WeChatPublishTask.from_json(video_path, script_data)
 
 
-class LegacyMediumPublisherAdapter:
-    platform = "medium"
-
-    def publish(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-        account: str | None,
-    ) -> PlatformRunOutcome:
-        del video_path, privacy, account
-        from copublisher.core import MediumPublishTask, MediumPublisher
-
-        started = time.perf_counter()
-        try:
-            medium_data = script_data.get("medium", {})
-            task = MediumPublishTask(
-                title=medium_data.get("title", ""),
-                content=medium_data.get("content", medium_data.get("body_markdown", "")),
-                tags=medium_data.get("tags", []),
-                canonical_url=medium_data.get("canonical_url"),
-                publish_status=medium_data.get("publish_status", "draft"),
-            )
-            with MediumPublisher() as publisher:
-                success, detail = publisher.publish(task)
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if success:
-                return PlatformRunOutcome(self.platform, True, detail or "", duration_ms=elapsed_ms)
-
-            code = ErrorCode.MP_PLATFORM_ERROR
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=detail or "medium publish failed",
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            code = map_exception_to_error_code(exc)
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=str(exc),
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
+def _youtube_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import YouTubePublishTask
+    task = YouTubePublishTask.from_json(video_path, script_data)
+    task.privacy_status = privacy
+    return task
 
 
-class LegacyTwitterPublisherAdapter:
-    platform = "twitter"
-
-    def publish(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-        account: str | None,
-    ) -> PlatformRunOutcome:
-        del video_path, privacy, account
-        from copublisher.core import TwitterPublishTask, TwitterPublisher
-
-        started = time.perf_counter()
-        try:
-            twitter_data = script_data.get("twitter", {})
-            tweets = twitter_data.get("tweets", [])
-            if isinstance(tweets, str):
-                tweets = [part.strip() for part in tweets.split("\n\n") if part.strip()]
-            task = TwitterPublishTask(
-                title=twitter_data.get("title", "thread"),
-                tweets=tweets,
-                hashtags=twitter_data.get("hashtags", []),
-            )
-            with TwitterPublisher() as publisher:
-                success, detail = publisher.publish(task)
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if success:
-                return PlatformRunOutcome(self.platform, True, detail or "", duration_ms=elapsed_ms)
-
-            code = ErrorCode.MP_PLATFORM_ERROR
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=detail or "twitter publish failed",
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            code = map_exception_to_error_code(exc)
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=str(exc),
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
+def _medium_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import MediumPublishTask
+    d = script_data.get("medium", {})
+    return MediumPublishTask(
+        title=d.get("title", ""),
+        content=d.get("content", d.get("body_markdown", "")),
+        tags=d.get("tags", []),
+        canonical_url=d.get("canonical_url"),
+        publish_status=d.get("publish_status", "draft"),
+    )
 
 
-class LegacyDevToPublisherAdapter:
-    platform = "devto"
-
-    def publish(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-        account: str | None,
-    ) -> PlatformRunOutcome:
-        del video_path, privacy, account
-        from copublisher.core import DevToPublishTask, DevToPublisher
-
-        started = time.perf_counter()
-        try:
-            devto_data = script_data.get("devto", {})
-            task = DevToPublishTask(
-                title=devto_data.get("title", ""),
-                body_markdown=devto_data.get("body_markdown", ""),
-                tags=devto_data.get("tags", []),
-                series=devto_data.get("series"),
-                canonical_url=devto_data.get("canonical_url"),
-                published=bool(devto_data.get("published", False)),
-            )
-            with DevToPublisher() as publisher:
-                success, detail = publisher.publish(task)
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if success:
-                return PlatformRunOutcome(self.platform, True, detail or "", duration_ms=elapsed_ms)
-
-            code = ErrorCode.MP_PLATFORM_ERROR
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=detail or "devto publish failed",
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            code = map_exception_to_error_code(exc)
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=str(exc),
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
+def _twitter_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import TwitterPublishTask
+    d = script_data.get("twitter", {})
+    tweets = d.get("tweets", [])
+    if isinstance(tweets, str):
+        tweets = [part.strip() for part in tweets.split("\n\n") if part.strip()]
+    return TwitterPublishTask(
+        title=d.get("title", "thread"),
+        tweets=tweets,
+        hashtags=d.get("hashtags", []),
+    )
 
 
-class LegacyTikTokPublisherAdapter:
-    platform = "tiktok"
-
-    def publish(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-        account: str | None,
-    ) -> PlatformRunOutcome:
-        del privacy, account
-        from copublisher.core import TikTokPublishTask, TikTokPublisher
-
-        started = time.perf_counter()
-        try:
-            task = TikTokPublishTask.from_json(video_path, script_data)
-            with TikTokPublisher() as publisher:
-                success, detail = publisher.publish(task)
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if success:
-                return PlatformRunOutcome(self.platform, True, detail or "", duration_ms=elapsed_ms)
-
-            code = ErrorCode.MP_PLATFORM_ERROR
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=detail or "tiktok publish failed",
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            code = map_exception_to_error_code(exc)
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=str(exc),
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
+def _devto_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import DevToPublishTask
+    d = script_data.get("devto", {})
+    return DevToPublishTask(
+        title=d.get("title", ""),
+        body_markdown=d.get("body_markdown", ""),
+        tags=d.get("tags", []),
+        series=d.get("series"),
+        canonical_url=d.get("canonical_url"),
+        published=bool(d.get("published", False)),
+    )
 
 
-class LegacyInstagramPublisherAdapter:
-    platform = "instagram"
+def _tiktok_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import TikTokPublishTask
+    return TikTokPublishTask.from_json(video_path, script_data)
 
-    def publish(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-        account: str | None,
-    ) -> PlatformRunOutcome:
-        del privacy, account
-        from copublisher.core import InstagramPublishTask, InstagramPublisher
 
-        started = time.perf_counter()
-        try:
-            task = InstagramPublishTask.from_json(video_path, script_data)
-            with InstagramPublisher() as publisher:
-                success, detail = publisher.publish(task)
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if success:
-                return PlatformRunOutcome(self.platform, True, detail or "", duration_ms=elapsed_ms)
+def _instagram_task(*, video_path, script_data, privacy, account):
+    from copublisher.core import InstagramPublishTask
+    return InstagramPublishTask.from_json(video_path, script_data)
 
-            code = ErrorCode.MP_PLATFORM_ERROR
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=detail or "instagram publish failed",
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            code = map_exception_to_error_code(exc)
-            policy = get_policy(code)
-            return PlatformRunOutcome(
-                platform=self.platform,
-                success=False,
-                message=str(exc),
-                error_code=code,
-                retryable=policy.retryable,
-                manual_takeover_required=policy.manual_takeover_required,
-                duration_ms=elapsed_ms,
-            )
 
+# ── Per-platform publisher factories ────────────────────────────────
+
+def _wechat_publisher(*, account):
+    from copublisher.core import WeChatPublisher
+    pub = WeChatPublisher(headless=False, account=account)
+    pub.authenticate()
+    return pub
+
+
+def _youtube_publisher(*, account):
+    from copublisher.core import YouTubePublisher
+    return YouTubePublisher()
+
+
+def _medium_publisher(*, account):
+    from copublisher.core import MediumPublisher
+    return MediumPublisher()
+
+
+def _twitter_publisher(*, account):
+    from copublisher.core import TwitterPublisher
+    return TwitterPublisher()
+
+
+def _devto_publisher(*, account):
+    from copublisher.core import DevToPublisher
+    return DevToPublisher()
+
+
+def _tiktok_publisher(*, account):
+    from copublisher.core import TikTokPublisher
+    return TikTokPublisher()
+
+
+def _instagram_publisher(*, account):
+    from copublisher.core import InstagramPublisher
+    return InstagramPublisher()
+
+
+# ── Convenience factories for the Registry ───────────────────────────
+
+def make_wechat_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("wechat", _wechat_task, _wechat_publisher)
+
+
+def make_youtube_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("youtube", _youtube_task, _youtube_publisher)
+
+
+def make_medium_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("medium", _medium_task, _medium_publisher)
+
+
+def make_twitter_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("twitter", _twitter_task, _twitter_publisher)
+
+
+def make_devto_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("devto", _devto_task, _devto_publisher)
+
+
+def make_tiktok_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("tiktok", _tiktok_task, _tiktok_publisher)
+
+
+def make_instagram_adapter() -> GenericPublisherAdapter:
+    return GenericPublisherAdapter("instagram", _instagram_task, _instagram_publisher)

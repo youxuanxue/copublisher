@@ -68,49 +68,49 @@ class PublisherRegistry:
 
 def build_default_registry() -> PublisherRegistry:
     from copublisher.infrastructure.publishers.legacy import (
-        LegacyDevToPublisherAdapter,
-        LegacyInstagramPublisherAdapter,
-        LegacyMediumPublisherAdapter,
-        LegacyTikTokPublisherAdapter,
-        LegacyTwitterPublisherAdapter,
-        LegacyWeChatPublisherAdapter,
-        LegacyYouTubePublisherAdapter,
+        make_devto_adapter,
+        make_instagram_adapter,
+        make_medium_adapter,
+        make_tiktok_adapter,
+        make_twitter_adapter,
+        make_wechat_adapter,
+        make_youtube_adapter,
     )
 
     registry = PublisherRegistry()
     registry.register(
         "wechat",
-        factory=LegacyWeChatPublisherAdapter,
+        factory=make_wechat_adapter,
         capabilities={"content": "video", "requires_manual_confirmation": True},
     )
     registry.register(
         "youtube",
-        factory=LegacyYouTubePublisherAdapter,
+        factory=make_youtube_adapter,
         capabilities={"content": "video", "requires_manual_confirmation": False},
     )
     registry.register(
         "medium",
-        factory=LegacyMediumPublisherAdapter,
+        factory=make_medium_adapter,
         capabilities={"content": "article", "requires_manual_confirmation": False},
     )
     registry.register(
         "twitter",
-        factory=LegacyTwitterPublisherAdapter,
+        factory=make_twitter_adapter,
         capabilities={"content": "article", "requires_manual_confirmation": False},
     )
     registry.register(
         "devto",
-        factory=LegacyDevToPublisherAdapter,
+        factory=make_devto_adapter,
         capabilities={"content": "article", "requires_manual_confirmation": False},
     )
     registry.register(
         "tiktok",
-        factory=LegacyTikTokPublisherAdapter,
+        factory=make_tiktok_adapter,
         capabilities={"content": "video", "requires_manual_confirmation": True},
     )
     registry.register(
         "instagram",
-        factory=LegacyInstagramPublisherAdapter,
+        factory=make_instagram_adapter,
         capabilities={"content": "video", "requires_manual_confirmation": False},
     )
     return registry

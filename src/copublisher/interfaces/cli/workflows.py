@@ -115,6 +115,10 @@ def run_legacy_cli(args, log_callback: Callable[[str], None] = print) -> dict[st
     if not script_path.exists():
         print(f"❌ 脚本文件不存在: {script_path}")
         sys.exit(1)
+    _MAX_SCRIPT_SIZE = 1 * 1024 * 1024  # 1 MB
+    if script_path.stat().st_size > _MAX_SCRIPT_SIZE:
+        print(f"❌ 脚本文件过大 ({script_path.stat().st_size} bytes, 上限 {_MAX_SCRIPT_SIZE})")
+        sys.exit(1)
     try:
         script_data = json.loads(script_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:

@@ -15,6 +15,7 @@ import requests
 from requests_oauthlib import OAuth1
 
 from .base import Publisher, TwitterPublishTask
+from copublisher.shared.config import find_config_file
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +43,8 @@ class TwitterPublisher(Publisher):
             log_callback: 日志回调函数
         """
         super().__init__(log_callback)
-        self.credentials_path = self._find_config_file(credentials_path)
+        self.credentials_path = find_config_file(credentials_path)
         self.auth: Optional[OAuth1] = None
-    
-    def _find_config_file(self, config_path: str) -> Path:
-        """查找配置文件"""
-        possible_paths = [
-            Path(config_path),
-            Path.cwd() / config_path,
-            Path.cwd().parent / config_path,
-        ]
-        for path in possible_paths:
-            if path.exists():
-                return path
-        return Path(config_path)
     
     def authenticate(self):
         """

@@ -18,6 +18,8 @@ _EXPORTS = {
     "DevToPublishTask": ("copublisher.core.base", "DevToPublishTask"),
     "TikTokPublishTask": ("copublisher.core.base", "TikTokPublishTask"),
     "InstagramPublishTask": ("copublisher.core.base", "InstagramPublishTask"),
+    # 公众号草稿发布
+    "GzhDraftPublisher": ("copublisher.core.gzh_drafts", "GzhDraftPublisher"),
     # 发布器
     "WeChatPublisher": ("copublisher.core.wechat", "WeChatPublisher"),
     "YouTubePublisher": ("copublisher.core.youtube", "YouTubePublisher"),
@@ -54,6 +56,8 @@ __all__ = [
     "DevToPublishTask",
     "TikTokPublishTask",
     "InstagramPublishTask",
+    # 公众号草稿发布
+    "GzhDraftPublisher",
     # 发布器
     "WeChatPublisher",
     "YouTubePublisher",

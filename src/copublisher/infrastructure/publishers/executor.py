@@ -1,5 +1,8 @@
 """
-Infrastructure executor that hosts core publisher integrations.
+Infrastructure executor that routes publish requests through the Registry.
+
+Replaces the previous per-platform if/elif dispatch with a unified
+Registry-driven path.
 """
 
 from __future__ import annotations
@@ -7,8 +10,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from copublisher.domain.result import PlatformRunOutcome
+
 
 class LegacyPlatformExecutor:
+    """
+    Executes publish operations for both legacy-script and episode-adapter
+    flows.  All platform dispatch goes through ``PublisherRegistry``,
+    eliminating the previous dual-path inconsistency.
+    """
+
     def __init__(self, log_callback: Callable[[str], None] | None = None):
         self.log_callback = log_callback
         self.wechat_publisher = None
@@ -54,23 +65,26 @@ class LegacyPlatformExecutor:
         account: str | None,
         keep_wechat_browser_open: bool = False,
     ) -> dict[str, tuple[bool, str]]:
-        results: dict[str, tuple[bool, str]] = {}
         normalized = (platform or "wechat").strip().lower()
         selected = ["wechat", "youtube"] if normalized == "both" else [normalized]
 
-        if "wechat" in selected:
-            results["wechat"] = self._publish_wechat_from_script(
-                video_path=video_path,
-                script_data=script_data,
-                account=account,
-                keep_browser_open=keep_wechat_browser_open,
-            )
-        if "youtube" in selected:
-            results["youtube"] = self._publish_youtube_from_script(
-                video_path=video_path,
-                script_data=script_data,
-                privacy=privacy,
-            )
+        results: dict[str, tuple[bool, str]] = {}
+        for plat in selected:
+            if plat == "wechat" and keep_wechat_browser_open:
+                results[plat] = self._publish_wechat_keep_browser(
+                    video_path=video_path,
+                    script_data=script_data,
+                    account=account,
+                )
+            else:
+                outcome = self._publish_via_registry(
+                    platform=plat,
+                    video_path=video_path,
+                    script_data=script_data,
+                    privacy=privacy,
+                    account=account,
+                )
+                results[plat] = (outcome.success, outcome.message)
         return results
 
     def run_episode_adapter(
@@ -83,16 +97,7 @@ class LegacyPlatformExecutor:
         account: str | None,
         keep_wechat_browser_open: bool = False,
     ) -> dict[str, tuple[bool, str]]:
-        from copublisher.core import (
-            DevToPublisher,
-            EpisodeAdapter,
-            InstagramPublisher,
-            MediumPublisher,
-            TikTokPublisher,
-            TwitterPublisher,
-            WeChatPublisher,
-            YouTubePublisher,
-        )
+        from copublisher.core import EpisodeAdapter
 
         adapter = EpisodeAdapter(episode_path)
         results: dict[str, tuple[bool, str]] = {}
@@ -103,94 +108,118 @@ class LegacyPlatformExecutor:
                 results[normalized] = (False, "需要视频文件")
                 continue
             try:
-                if normalized == "medium":
-                    task = adapter.to_medium_task()
-                    with MediumPublisher(log_callback=self._log) as publisher:
-                        results[normalized] = publisher.publish(task)
-                elif normalized == "twitter":
-                    task = adapter.to_twitter_task()
-                    with TwitterPublisher(log_callback=self._log) as publisher:
-                        results[normalized] = publisher.publish(task)
-                elif normalized == "devto":
-                    task = adapter.to_devto_task()
-                    with DevToPublisher(log_callback=self._log) as publisher:
-                        results[normalized] = publisher.publish(task)
-                elif normalized == "tiktok":
-                    task = adapter.to_tiktok_task(video_path)
-                    with TikTokPublisher(log_callback=self._log) as publisher:
-                        results[normalized] = publisher.publish(task)
-                elif normalized == "instagram":
-                    task = adapter.to_instagram_task(video_path)
-                    with InstagramPublisher(log_callback=self._log) as publisher:
-                        results[normalized] = publisher.publish(task)
-                elif normalized == "wechat":
-                    task = adapter.to_wechat_task(video_path)
-                    if keep_wechat_browser_open:
-                        if self.wechat_publisher is None:
-                            self.wechat_publisher = WeChatPublisher(
-                                headless=False,
-                                log_callback=self._log,
-                                account=account,
-                            )
-                            self.wechat_publisher.start()
-                            self.wechat_publisher.authenticate()
-                        results[normalized] = self.wechat_publisher.publish(task)
-                    else:
-                        with WeChatPublisher(
-                            headless=False,
-                            log_callback=self._log,
-                            account=account,
-                        ) as publisher:
-                            publisher.authenticate()
-                            results[normalized] = publisher.publish(task)
-                elif normalized == "youtube":
-                    task = adapter.to_youtube_task(video_path)
-                    task.privacy_status = privacy
-                    with YouTubePublisher(log_callback=self._log) as publisher:
-                        results[normalized] = publisher.publish(task)
+                script_data = self._episode_to_script_data(adapter, normalized, video_path)
+
+                if normalized == "wechat" and keep_wechat_browser_open:
+                    results[normalized] = self._publish_wechat_keep_browser(
+                        video_path=video_path or Path("."),
+                        script_data=script_data,
+                        account=account,
+                    )
                 else:
-                    results[normalized] = (False, f"不支持的平台: {normalized}")
+                    outcome = self._publish_via_registry(
+                        platform=normalized,
+                        video_path=video_path or Path("."),
+                        script_data=script_data,
+                        privacy=privacy,
+                        account=account,
+                    )
+                    results[normalized] = (outcome.success, outcome.message)
             except Exception as exc:
                 results[normalized] = (False, str(exc))
         return results
 
-    def _publish_wechat_from_script(
+    # ── internal helpers ─────────────────────────────────────────────
+
+    def _publish_via_registry(
+        self,
+        *,
+        platform: str,
+        video_path: Path,
+        script_data: dict,
+        privacy: str,
+        account: str | None,
+    ) -> PlatformRunOutcome:
+        from copublisher.infrastructure.registry import build_default_registry
+
+        registry = build_default_registry()
+        adapter = registry.get(platform)
+        return adapter.publish(
+            video_path=video_path,
+            script_data=script_data,
+            privacy=privacy,
+            account=account,
+        )
+
+    def _publish_wechat_keep_browser(
         self,
         *,
         video_path: Path,
         script_data: dict,
         account: str | None,
-        keep_browser_open: bool,
     ) -> tuple[bool, str]:
         from copublisher.core import WeChatPublishTask, WeChatPublisher
 
         task = WeChatPublishTask.from_json(video_path, script_data)
-        if keep_browser_open:
-            if self.wechat_publisher is None:
-                self.wechat_publisher = WeChatPublisher(
-                    headless=False,
-                    account=account,
-                    log_callback=self._log,
-                )
-                self.wechat_publisher.start()
-                self.wechat_publisher.authenticate()
-            return self.wechat_publisher.publish(task)
+        if self.wechat_publisher is None:
+            self.wechat_publisher = WeChatPublisher(
+                headless=False,
+                log_callback=self._log,
+                account=account,
+            )
+            self.wechat_publisher.start()
+            self.wechat_publisher.authenticate()
+        return self.wechat_publisher.publish(task)
 
-        with WeChatPublisher(headless=False, account=account, log_callback=self._log) as publisher:
-            publisher.authenticate()
-            return publisher.publish(task)
-
-    def _publish_youtube_from_script(
-        self,
-        *,
-        video_path: Path,
-        script_data: dict,
-        privacy: str,
-    ) -> tuple[bool, str]:
-        from copublisher.core import YouTubePublishTask, YouTubePublisher
-
-        task = YouTubePublishTask.from_json(video_path, script_data)
-        task.privacy_status = privacy
-        with YouTubePublisher(log_callback=self._log) as publisher:
-            return publisher.publish(task)
-
+    @staticmethod
+    def _episode_to_script_data(adapter, platform: str, video_path: Path | None) -> dict:
+        """Convert EpisodeAdapter data into a flat script_data dict the adapters understand."""
+        if platform == "medium":
+            task = adapter.to_medium_task()
+            return {"medium": {
+                "title": task.title, "content": task.content,
+                "tags": task.tags, "canonical_url": task.canonical_url,
+                "publish_status": task.publish_status,
+            }}
+        if platform == "twitter":
+            task = adapter.to_twitter_task()
+            return {"twitter": {
+                "title": task.title, "tweets": task.tweets,
+                "hashtags": task.hashtags,
+            }}
+        if platform == "devto":
+            task = adapter.to_devto_task()
+            return {"devto": {
+                "title": task.title, "body_markdown": task.body_markdown,
+                "tags": task.tags, "series": task.series,
+                "canonical_url": task.canonical_url,
+                "published": task.published,
+            }}
+        if platform == "tiktok":
+            task = adapter.to_tiktok_task(video_path)
+            return {"tiktok": {
+                "description": task.description,
+                "privacy": task.privacy,
+            }}
+        if platform == "instagram":
+            task = adapter.to_instagram_task(video_path)
+            return {"instagram": {
+                "caption": task.caption,
+                "privacy": task.privacy,
+            }}
+        if platform == "wechat":
+            task = adapter.to_wechat_task(video_path)
+            return {"wechat": {
+                "title": task.title,
+                "description": task.description,
+                "hashtags": task.hashtags,
+            }}
+        if platform == "youtube":
+            task = adapter.to_youtube_task(video_path)
+            return {"youtube": {
+                "title": task.title,
+                "description": task.description,
+                "tags": task.tags,
+                "privacy": task.privacy_status,
+            }}
+        raise ValueError(f"不支持的平台: {platform}")
