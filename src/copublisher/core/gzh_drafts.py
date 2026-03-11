@@ -148,10 +148,21 @@ def extract_profile_cards(md_text: str) -> tuple[str, list[str]]:
     return PROFILE_CARD_RE.sub(_repl, md_text), cards
 
 
+def parse_md_article(content: str, default_title: str = "") -> tuple[str, str]:
+    """从 Markdown 全文提取标题（首行 #）和正文。用于目录批量与单篇发布统一解析。"""
+    title = default_title
+    m = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+    if m:
+        title = m.group(1).strip()
+        content = content.replace(m.group(0), "", 1).strip()
+    return title, content
+
+
 class GzhDraftPublisher:
     """微信公众号图文草稿发布器。
 
     浏览器管理委托给 ``PlaywrightBrowser``。
+    account 用于区分多账号登录状态，对应认证目录 ~/.copublisher/{account}/。
     """
 
     BASE_URL = "https://mp.weixin.qq.com"
@@ -160,10 +171,11 @@ class GzhDraftPublisher:
         self,
         headless: bool = False,
         log_callback: Optional[Callable[[str], None]] = None,
+        account: Optional[str] = None,
     ):
         self._log_fn = log_callback or (lambda msg, *_: print(msg))
         self.session = PlaywrightBrowser(
-            "gzh_article", None, headless, self._log_fn,
+            "gzh_article", account, headless, self._log_fn,
         )
 
     def start(self):

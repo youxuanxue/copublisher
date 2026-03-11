@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-微信公众号草稿批量发布入口脚本（向后兼容）。
+微信公众号草稿发布入口脚本（向后兼容）。
 
-推荐用法: python -m copublisher gzh-drafts <content_dir> [--skip N]
+推荐用法:
+  python -m copublisher gzh-drafts <目录或单篇.md> [--skip N] [--account 账号]
+  python -m copublisher gzh-drafts /path/to/article.md --account yiqichengzhang
 
 本脚本作为便捷入口保留：若不传参数则使用环境变量 COPUBLISHER_GZH_DEFAULT_DIR 或历史默认目录。
 """
@@ -26,7 +28,7 @@ def main():
         default_dir = Path(_DEFAULT_CONTENT_DIR)
         if not default_dir.exists():
             print(f"❌ 默认目录不存在: {default_dir}")
-            print("   请设置 COPUBLISHER_GZH_DEFAULT_DIR 或显式指定: copublisher gzh-drafts <content_dir>")
+            print("   请设置 COPUBLISHER_GZH_DEFAULT_DIR 或显式指定: copublisher gzh-drafts <目录或单篇.md>")
             sys.exit(1)
         sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
         from copublisher.interfaces.cli.gzh_drafts_command import run_gzh_drafts_cli

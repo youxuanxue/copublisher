@@ -18,11 +18,13 @@ class GzhDraftsRunnerPort(Protocol):
         skip: int = 0,
         headless: bool = False,
         progress_fn: Callable[[str], None] | None = None,
+        article_path: Path | None = None,
+        account: str | None = None,
     ) -> None: ...
 
 
 class GzhDraftsUseCase:
-    """批量将 Markdown 文件发布为公众号图文草稿。"""
+    """批量或将单篇 Markdown 发布为公众号图文草稿。"""
 
     def __init__(self, runner: GzhDraftsRunnerPort | None = None):
         if runner is None:
@@ -38,10 +40,14 @@ class GzhDraftsUseCase:
         skip: int = 0,
         headless: bool = False,
         progress_fn: Callable[[str], None] | None = None,
+        article_path: Path | None = None,
+        account: str | None = None,
     ) -> None:
         self._runner.run(
             content_dir=content_dir,
             skip=skip,
             headless=headless,
             progress_fn=progress_fn,
+            article_path=article_path,
+            account=account,
         )
