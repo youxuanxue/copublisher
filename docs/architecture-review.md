@@ -313,7 +313,7 @@ class LegacyXxxPublisherAdapter:
 **建议**：
 - `Platform` 枚举 → `domain/`
 - `Publisher` ABC → `infrastructure/` 或提升为独立端口
-- 各 Task 类保留在 `core/` 或迁移到 `domain/`
+- 各 Task 类迁移到 `domain/`
 
 #### P1-2：GUI 线程安全缺陷
 
@@ -373,7 +373,7 @@ os.environ['HTTPS_PROXY'] = proxy_url
 - Markdown → HTML 渲染逻辑
 - 未集成到 `copublisher` 包中
 
-**建议**：迁移到 `core/` 或 `interfaces/cli/` 中，或作为独立脚本移入 `scripts/`。
+**建议**：按照项目主架构，拆分内部，合并公共项模块，按照主项目结构进行拆分（按需迁移到 `core/`、`interfaces/cli/` 等）
 
 #### P1-7：`src/media_publisher/` 残留
 
@@ -572,14 +572,42 @@ README 中的项目结构图仍是早期版本，未包含 `domain/`、`applicat
 
 ### 9.2 改进方案
 
-理想状态下，新增平台只需：
-1. 创建 `core/new_platform.py`（Publisher + Task）
-2. 在 Registry 注册
+先给结论：**新增平台不应只放在 `domain` 或 `core` 单层，而应按职责拆分**。
 
-其余应通过：
-- 平台自描述（capabilities 字典）替代硬编码列表
-- Registry 驱动替代 if-elif 分支
-- 自动收集替代手动 export
+- `domain`：放**平台语义**（平台标识、任务 schema、能力声明）
+- `core`（目标态为 `publishers/`）：放**平台实现**（认证、API/浏览器调用、重试细节）
+- `infrastructure`：放注册与装配（Registry、Adapter）
+
+换句话说，`domain` 决定“是什么”，`core/publishers` 决定“怎么做”。
+
+#### 推荐边界（新增平台时）
+
+1. 在 `domain` 增加平台定义  
+   - `Platform` 枚举值  
+   - 对应 `Task`（视频或文章）  
+   - `capabilities` 元数据（如 `supports_video`、`supports_article`、`supports_schedule`）
+2. 在 `core`（或未来 `publishers/`）新增 `NewPlatformPublisher` 实现  
+3. 在 `infrastructure/registry.py` 注册映射（`Platform -> Publisher/Adapter`）
+
+CLI / GUI / workflow 不再维护平台硬编码列表，而是统一读取 Registry + capabilities。
+
+#### 为什么不建议“只在 core 新增”
+
+- 会把平台语义和实现细节耦合在一起，继续放大 `core/base.py` 的 God Object 倾向
+- `domain` 无法成为稳定契约层，应用层会被迫依赖实现细节
+- 与目标态分层（附录 A）冲突，后续拆分成本更高
+
+#### 为什么也不建议“只在 domain 新增”
+
+- `domain` 只能定义规则，不能承担实际发布（外部 API、浏览器自动化）
+- 缺少 Publisher 实现，Registry 无法完成可运行装配
+
+#### 过渡期落地（当前仓库）
+
+在尚未完成 `core -> publishers/` 拆分前，可采用“`domain + core + registry` 三步”：
+1. `domain` 先收敛平台定义与 capabilities  
+2. `core/new_platform.py` 放发布实现  
+3. `registry` 统一注册，逐步移除 `if-elif` 与手工 export
 
 ### 9.3 调度系统集成
 
