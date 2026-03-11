@@ -12,7 +12,16 @@ class _FakeExecutor:
         self.calls.append("close")
         return False
 
-    def run_legacy_script(self, *, video_path: Path, script_data: dict, platform: str, privacy: str, account: str | None, keep_wechat_browser_open: bool = False):
+    def load_episode_overview(self, *, episode_path: Path) -> tuple[str, str]:
+        return "summary", "preview"
+
+    def run_list_drafts(self, *, batch_dirs: list, account=None) -> tuple[str, list, Path | None]:
+        return "", [], None
+
+    def run_wechat_batch(self, *, batch_dir: Path, pairs: list, account=None) -> list:
+        return [(True, "ok") for _ in pairs]
+
+    def run_legacy_script(self, *, video_path: Path, script_data: dict, platform: str, privacy: str, account=None, keep_wechat_browser_open: bool = False):
         del video_path, script_data, privacy, account, keep_wechat_browser_open
         if platform == "both":
             self.calls.extend(["wechat", "youtube"])
@@ -20,7 +29,7 @@ class _FakeExecutor:
         self.calls.append(platform)
         return {platform: (True, f"{platform}-ok")}
 
-    def run_episode_adapter(self, *, episode_path: Path, platforms: list[str], video_path: Path | None, privacy: str, account: str | None, keep_wechat_browser_open: bool = False):
+    def run_episode_adapter(self, *, episode_path: Path, platforms: list[str], video_path: Path | None, privacy: str, account=None, keep_wechat_browser_open: bool = False):
         del episode_path, video_path, privacy, account, keep_wechat_browser_open
         self.calls.append("episode")
         return {p: (True, f"{p}-ok") for p in platforms}

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from copublisher.application.usecases.publish_content import PublishContentUseCase
-from copublisher.shared.io import atomic_write_text
+from copublisher.shared.io import atomic_write_text, read_json_with_size_limit
 
 ALL_PLATFORMS = ["wechat", "youtube", "medium", "twitter", "devto", "tiktok", "instagram"]
 _MAX_CONFIG_SIZE = 1 * 1024 * 1024  # 1 MB
@@ -19,12 +19,7 @@ _MAX_CONFIG_SIZE = 1 * 1024 * 1024  # 1 MB
 
 def _read_json_with_size_limit(path: Path, label: str = "配置文件") -> dict:
     """读取 JSON 文件，限制大小防止 DoS。"""
-    size = path.stat().st_size
-    if size > _MAX_CONFIG_SIZE:
-        raise ValueError(
-            f"{label}过大: {size} bytes (上限 {_MAX_CONFIG_SIZE} bytes): {path}"
-        )
-    return json.loads(path.read_text(encoding="utf-8"))
+    return read_json_with_size_limit(path, _MAX_CONFIG_SIZE, label)
 
 
 ARTICLE_PLATFORMS = ["medium", "twitter", "devto"]
@@ -153,8 +148,6 @@ def run_legacy_cli(args, log_callback: Callable[[str], None] = print) -> dict[st
 
 
 def run_list_drafts(args, log_callback: Callable[[str], None] = print) -> None:
-    from copublisher.core import WeChatPublishTask, WeChatPublisher
-
     batch_dir_str = args.batch_dir.strip()
     batch_dirs = [Path(p.strip()) for p in batch_dir_str.split(",") if p.strip()]
     if not batch_dirs:
@@ -165,49 +158,22 @@ def run_list_drafts(args, log_callback: Callable[[str], None] = print) -> None:
             print(f"❌ 目录不存在: {d}")
             sys.exit(1)
 
-    expected = []
-    for batch_dir in batch_dirs:
-        output_dir = batch_dir / "output"
-        config_dir = batch_dir / "config"
-        if not output_dir.exists() or not config_dir.exists():
-            print(f"⚠️ 跳过（缺 output/config）: {batch_dir}")
-            continue
-        videos = sorted(output_dir.glob("*-Clip.mp4"))
-        pairs = []
-        for video in videos:
-            stem = video.stem.replace("-Clip", "-Strategy")
-            config = config_dir / f"{stem}.json"
-            if config.exists():
-                pairs.append((video, config))
-        if not pairs:
-            print(f"⚠️ 未找到视频-配置对: {batch_dir}")
-            continue
-        series_name = batch_dir.name
-        for video, config in pairs:
-            try:
-                script_data = _read_json_with_size_limit(config, f"配置 {config.name}")
-            except ValueError as e:
-                print(f"⚠️ 跳过 {video.name}: {e}")
-                continue
-            task = WeChatPublishTask.from_json(video, script_data)
-            desc = (task.get_full_description() or "").strip()[:50]
-            title = (task.title or "").strip()
-            expected.append((series_name, video.name, title, desc))
+    usecase = PublishContentUseCase(log_callback=log_callback)
+    draft_full_text, expected, dump_dir = usecase.run_list_drafts(
+        batch_dirs=batch_dirs,
+        account=getattr(args, "account", None),
+    )
     if not expected:
         print("❌ 未找到任何预期视频配置")
         sys.exit(1)
 
-    account = getattr(args, "account", None)
-    with WeChatPublisher(headless=False, log_callback=log_callback, account=account) as publisher:
-        publisher.authenticate()
-        draft_full_text = publisher.get_draft_page_text()
-
-    dump_path = Path(args.batch_dir.split(",")[0].strip()) / "draft_page_dump.txt"
-    try:
-        atomic_write_text(dump_path, draft_full_text, encoding="utf-8")
-        print(f"📄 草稿箱全文已保存至: {dump_path}（可人工核查）")
-    except Exception:
-        pass
+    if dump_dir:
+        dump_path = dump_dir / "draft_page_dump.txt"
+        try:
+            atomic_write_text(dump_path, draft_full_text, encoding="utf-8")
+            print(f"📄 草稿箱全文已保存至: {dump_path}（可人工核查）")
+        except Exception:
+            pass
 
     def matched(title: str, desc: str) -> bool:
         title = (title or "").strip()
@@ -232,8 +198,6 @@ def run_list_drafts(args, log_callback: Callable[[str], None] = print) -> None:
 
 
 def run_batch_cli(args, log_callback: Callable[[str], None] = print) -> None:
-    from copublisher.core import WeChatPublishTask, WeChatPublisher
-
     batch_dir = Path(args.batch_dir)
     if not batch_dir.exists():
         print(f"❌ 目录不存在: {batch_dir}")
@@ -260,7 +224,6 @@ def run_batch_cli(args, log_callback: Callable[[str], None] = print) -> None:
                 sys.exit(1)
             print(f"📌 仅发布指定集数: {only_tokens}（共 {len(pairs)} 条，已过滤 {original_count - len(pairs)} 条）")
 
-    tasks = []
     print(f"\n📂 系列目录: {batch_dir}")
     print(f"📊 共发现 {len(pairs)} 个视频\n")
     for i, (video, config) in enumerate(pairs, 1):
@@ -269,17 +232,21 @@ def run_batch_cli(args, log_callback: Callable[[str], None] = print) -> None:
         except ValueError as e:
             print(f"❌ {config.name}: {e}")
             sys.exit(1)
-        task = WeChatPublishTask.from_json(video, script_data)
-        tasks.append(task)
-        print(f"  {i:2d}. {video.name}  ->  {task.title}")
+        wechat_data = script_data.get("wechat", {})
+        title = (wechat_data.get("title") or "").strip()
+        print(f"  {i:2d}. {video.name}  ->  {title}")
     print()
 
     account = getattr(args, "account", None)
     if account:
         print(f"📌 账号: {account}")
-    with WeChatPublisher(headless=False, log_callback=log_callback, account=account) as publisher:
-        publisher.authenticate()
-        results = publisher.publish_batch(tasks)
+
+    usecase = PublishContentUseCase(log_callback=log_callback)
+    results = usecase.run_wechat_batch(
+        batch_dir=batch_dir,
+        pairs=pairs,
+        account=account,
+    )
 
     print(f"\n{'='*50}")
     print("📊 批量发布结果汇总")

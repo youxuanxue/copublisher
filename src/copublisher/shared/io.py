@@ -49,6 +49,16 @@ def atomic_write_text(
             tmp_path.unlink()
 
 
+def read_json_with_size_limit(
+    path: Path, max_size: int = 1024 * 1024, label: str = "文件"
+) -> dict[str, Any]:
+    """读取 JSON 文件，限制大小防止 DoS。"""
+    size = path.stat().st_size
+    if size > max_size:
+        raise ValueError(f"{label}过大: {size} bytes (上限 {max_size} bytes): {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def atomic_write_json(
     path: str | Path,
     payload: Any,

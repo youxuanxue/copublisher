@@ -11,6 +11,12 @@ from typing import Callable, Protocol
 class PublishExecutorPort(Protocol):
     def load_episode_overview(self, *, episode_path: Path) -> tuple[str, str]: ...
     def close_wechat_browser(self) -> bool: ...
+    def run_list_drafts(
+        self, *, batch_dirs: list[Path], account: str | None
+    ) -> tuple[str, list[tuple[str, str, str, str]], Path | None]: ...
+    def run_wechat_batch(
+        self, *, batch_dir: Path, pairs: list[tuple[Path, Path]], account: str | None
+    ) -> list[tuple[bool, str]]: ...
     def run_legacy_script(
         self,
         *,
@@ -50,6 +56,16 @@ class PublishContentUseCase:
 
     def load_episode_overview(self, *, episode_path: Path) -> tuple[str, str]:
         return self.executor.load_episode_overview(episode_path=episode_path)
+
+    def run_list_drafts(
+        self, *, batch_dirs: list[Path], account: str | None
+    ) -> tuple[str, list[tuple[str, str, str, str]], Path | None]:
+        return self.executor.run_list_drafts(batch_dirs=batch_dirs, account=account)
+
+    def run_wechat_batch(
+        self, *, batch_dir: Path, pairs: list[tuple[Path, Path]], account: str | None
+    ) -> list[tuple[bool, str]]:
+        return self.executor.run_wechat_batch(batch_dir=batch_dir, pairs=pairs, account=account)
 
     def run_legacy_script(
         self,

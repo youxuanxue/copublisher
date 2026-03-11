@@ -62,6 +62,7 @@ src/copublisher/
 │       └── blue_ocean_adapter.py
 ├── infrastructure/          # 基础设施层
 │   ├── registry.py          # PublisherRegistry + build_default_registry
+│   ├── gzh_drafts_runner.py # GzhDraftsRunner (封装 core.gzh_drafts)
 │   ├── publishers/
 │   │   ├── executor.py      # LegacyPlatformExecutor
 │   │   └── legacy.py        # 7 个 Legacy*PublisherAdapter
@@ -83,12 +84,15 @@ src/copublisher/
 ├── interfaces/cli/          # CLI 接口层
 │   ├── job_command.py       # job 子命令实现
 │   ├── job_runner.py        # job UseCase 组装
-│   └── workflows.py         # 批量/Episode/传统 CLI 流程
+│   ├── workflows.py         # 批量/Episode/传统 CLI 流程
+│   ├── gzh_drafts_command.py # 公众号草稿批量发布
+│   └── verify_command.py   # 安装验证
 ├── gui/                     # GUI 层
 │   └── app.py               # Gradio Web 界面
 └── shared/                  # 共享工具
-    ├── io.py                # atomic_write_text / atomic_write_json
-    └── security.py          # sanitize_identifier
+    ├── io.py                # atomic_write_text / atomic_write_json / read_json_with_size_limit
+    ├── security.py          # sanitize_identifier
+    └── config.py            # find_config_file
 ```
 
 ### 2.2 数据流概要

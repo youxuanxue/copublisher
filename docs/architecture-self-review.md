@@ -35,7 +35,7 @@
 | M2 平台插件化 | ✅ | `PublisherRegistry`、`Legacy*Adapter` 已实现 |
 | M2 幂等与补偿 | ✅ | `IdempotencyService`、`ExecutionStateStore` 已实现 |
 | M2 可观测 | ⚠️ | 结构化日志字段部分覆盖，metrics 尚未完善 |
-| 统一发布路径 | ❌ | 双路径仍存在（Legacy vs Registry） |
+| 统一发布路径 | ✅ | 底层均通过 Registry 分发 |
 
 **architecture-review.md 状态：仍有 P0/P1 待办**
 
@@ -58,7 +58,7 @@
 
 1. 新增子命令 `copublisher gzh-drafts <content_dir> [--skip N] [--headless]`
 2. 根目录 `publish_gzh_drafts.py` 改为薄转发层，保留向后兼容（无参数时使用默认目录）
-3. 业务逻辑统一在 `interfaces/cli/gzh_drafts_command.py`，依赖 `core.gzh_drafts.GzhDraftPublisher`
+3. 业务逻辑通过 `GzhDraftsUseCase` → `GzhDraftsRunner`(infrastructure) → `core.gzh_drafts`，interfaces 仅依赖 application
 
 ### 1.4 verify_install.py 的目的是什么？怎么融合？
 
@@ -83,9 +83,10 @@
 
 ### 2.2 架构遗留问题（来自 architecture-review）
 
-- **双发布路径**：Legacy 与 Registry 并存，错误格式、幂等支持不一致
+- ~~**双发布路径**~~：已统一，底层均走 Registry
 - **core 身份不清**：混合领域、基础设施、平台实现
 - **扩展成本高**：新增平台需改约 10 个文件
+- ~~**interfaces 引用 core**~~：已修正，通过 UseCase/Executor 间接
 
 ### 2.3 文档与实现不一致
 
@@ -130,14 +131,14 @@
 | P0 | 提取 GenericPublisherAdapter，消除 7 个 Adapter 样板 | ✅ |
 | P1 | GUI 线程安全、socket/proxy 全局污染修复 | ✅ |
 | P1 | 输入大小限制、sanitize 文档、凭据 0600 | ✅ |
-| P2 | `_find_config_file` 提取到 shared、迁移 pytest | 待办 |
+| P2 | `find_config_file` 提取到 shared | ✅ 已在 shared/config.py |
 
 ---
 
 ## 6. 结论
 
 - **examples**：保留，补充定位说明与路径修正
-- **plan/architecture-review**：部分完成，双路径与 core 职责是主要缺口
+- **plan/architecture-review**：部分完成，双路径已统一；core 职责与平台扩展成本仍为待优化项
 - **publish_gzh_drafts / verify_install**：已融合到 src 体系，根脚本保留为薄转发
 - **整体结构**：分层已成型，游离脚本已收敛；后续以「统一发布路径」和「平台扩展成本」为重点迭代
 
@@ -179,3 +180,50 @@
 | **JobSpec vs PublishTask 概念割裂** | 同为“任务”却分属 domain/core | 长期可考虑 JobSpec 作为统一入口，Task 作为平台适配层内部实现 |
 
 以上为结构性技术债，当前不影响功能与安全，可按优先级逐步偿还。
+
+---
+
+## 8. 第 5 轮深度自检（interfaces 层依赖违规）
+
+### 8.1 新发现问题
+
+**interfaces 违规引用 core**：`workflows.py`、`gzh_drafts_command.py` 曾直接 `from copublisher.core`，违反分层（interfaces 应只依赖 application/infrastructure）。
+
+### 8.2 第 5 轮修正 ✅ 已实施
+
+1. **workflows**：`run_list_drafts`、`run_batch_cli` 改为通过 `PublishContentUseCase.run_list_drafts()`、`run_wechat_batch()` 调用
+2. **executor**：新增 `run_list_drafts`、`run_wechat_batch` 方法，封装 `WeChatPublisher` 相关逻辑
+3. **gzh_drafts_command**：新增 `GzhDraftsUseCase` + `GzhDraftsRunner`（infrastructure），interfaces 仅依赖 application
+4. **shared/io**：新增 `read_json_with_size_limit`，供 workflows 与 executor 复用
+5. **layering 测试**：新增 `test_interfaces_cli_does_not_import_core_directly`
+
+### 8.3 修正后依赖链
+
+```
+interfaces → application → infrastructure → core
+     ↓              ↓              ↓
+  (无 core)    (无 core)      (可引用 core)
+```
+
+---
+
+## 9. 第 6 轮深度自检（文档与目录结构同步）
+
+### 9.1 本轮修正 ✅
+
+1. **1.3 过时描述**：gzh_drafts 依赖链已更正为 UseCase → Runner → core
+2. **P2 find_config_file**：状态从「待办」改为「✅ 已在 shared/config.py」
+3. **architecture-review 2.1**：补全 `gzh_drafts_command.py`、`verify_command.py`、`gzh_drafts_runner.py`、`shared/config.py`、`read_json_with_size_limit`
+
+### 9.2 当前剩余结构问题（技术债）
+
+| 类别 | 问题 | 建议 |
+|------|------|------|
+| **core 职责** | base.py 365 行混合 Platform、Task、Publisher | 分阶段拆分，非紧急 |
+| **概念重叠** | JobSpec vs PublishTask | 长期可合并入口，暂可接受 |
+| **入口对称** | gui 在顶层、cli 在 interfaces | 迁移到 interfaces/gui 列入下个大版本 |
+| **平台列表** | domain、workflows 各维护 VIDEO/ARTICLE_PLATFORMS | Registry 已含 `capabilities.content`，可新增 `list_platforms_by_content_type("video")` 等，由单一数据源派生 |
+
+### 9.3 结论
+
+分层与安全项（P0/P1）已完成；文档与目录说明已同步。剩余为结构性技术债，可按优先级渐进偿还。

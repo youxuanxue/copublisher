@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Callable
 
 from copublisher.domain.result import PlatformRunOutcome
+from copublisher.shared.io import atomic_write_text, read_json_with_size_limit
+
+
+_MAX_CONFIG_SIZE = 1 * 1024 * 1024  # 1 MB
 
 
 class LegacyPlatformExecutor:
@@ -223,3 +227,60 @@ class LegacyPlatformExecutor:
                 "privacy": task.privacy_status,
             }}
         raise ValueError(f"不支持的平台: {platform}")
+
+    def run_list_drafts(
+        self,
+        *,
+        batch_dirs: list[Path],
+        account: str | None,
+    ) -> tuple[str, list[tuple[str, str, str, str]], Path | None]:
+        """获取微信草稿箱全文，并与预期列表对比。返回 (draft_full_text, expected, dump_dir)。"""
+        from copublisher.core import WeChatPublishTask, WeChatPublisher
+
+        expected: list[tuple[str, str, str, str]] = []
+        for batch_dir in batch_dirs:
+            output_dir = batch_dir / "output"
+            config_dir = batch_dir / "config"
+            if not output_dir.exists() or not config_dir.exists():
+                continue
+            videos = sorted(output_dir.glob("*-Clip.mp4"))
+            for video in videos:
+                stem = video.stem.replace("-Clip", "-Strategy")
+                config = config_dir / f"{stem}.json"
+                if not config.exists():
+                    continue
+                try:
+                    script_data = read_json_with_size_limit(config, _MAX_CONFIG_SIZE, f"配置 {config.name}")
+                except ValueError:
+                    continue
+                task = WeChatPublishTask.from_json(video, script_data)
+                desc = (task.get_full_description() or "").strip()[:50]
+                title = (task.title or "").strip()
+                expected.append((batch_dir.name, video.name, title, desc))
+        if not expected:
+            return "", [], None
+
+        with WeChatPublisher(headless=False, log_callback=self._log, account=account) as publisher:
+            publisher.authenticate()
+            draft_full_text = publisher.get_draft_page_text()
+
+        dump_dir = batch_dirs[0] if batch_dirs else None
+        return draft_full_text, expected, dump_dir
+
+    def run_wechat_batch(
+        self,
+        *,
+        batch_dir: Path,
+        pairs: list[tuple[Path, Path]],
+        account: str | None,
+    ) -> list[tuple[bool, str]]:
+        """微信视频号批量发布。pairs: (video_path, config_path)。"""
+        from copublisher.core import WeChatPublishTask, WeChatPublisher
+
+        tasks = []
+        for video, config in pairs:
+            script_data = read_json_with_size_limit(config, _MAX_CONFIG_SIZE, f"配置 {config.name}")
+            tasks.append(WeChatPublishTask.from_json(video, script_data))
+        with WeChatPublisher(headless=False, log_callback=self._log, account=account) as publisher:
+            publisher.authenticate()
+            return publisher.publish_batch(tasks)

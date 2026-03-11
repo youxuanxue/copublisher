@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import time
 from pathlib import Path
 
 
@@ -60,26 +59,16 @@ def run_gzh_drafts_cli(argv: list[str], default_content_dir: Path | None = None)
     total = len(files_to_run)
     print(f"找到 {len(md_files)} 个文件，跳过前 {skip} 篇，本次处理 {total} 篇\n")
 
-    from copublisher.core.gzh_drafts import GzhDraftPublisher
+    from copublisher.application.usecases.gzh_drafts import GzhDraftsUseCase
 
-    pub = GzhDraftPublisher(headless=args.headless)
+    usecase = GzhDraftsUseCase()
     try:
-        pub.authenticate()
-        for i, md_file in enumerate(files_to_run, 1):
-            print(f"\n[{i}/{total}] {md_file.name}")
-            content = md_file.read_text(encoding="utf-8")
-
-            title = md_file.stem
-            m = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-            if m:
-                title = m.group(1).strip()
-                content = content.replace(m.group(0), "", 1).strip()
-
-            pub.create_draft(title=title, markdown_content=content)
-
-            if i < total:
-                print("  等待 4 秒...")
-                time.sleep(4)
+        usecase.run(
+            content_dir=content_dir,
+            skip=skip,
+            headless=args.headless,
+            progress_fn=lambda msg: print(msg),
+        )
     except KeyboardInterrupt:
         print("\n⚠️  用户取消操作")
         sys.exit(130)
@@ -88,5 +77,3 @@ def run_gzh_drafts_cli(argv: list[str], default_content_dir: Path | None = None)
         import traceback
         traceback.print_exc()
         sys.exit(1)
-    finally:
-        pub.close()
