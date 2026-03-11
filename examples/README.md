@@ -1,6 +1,6 @@
 # 使用示例
 
-本目录包含使用 copublisher 的各种示例代码。
+本目录包含使用 copublisher 的各种示例代码，作为 **SDK 参考实现**。生产环境可考虑 `copublisher --batch-dir` 或 `copublisher job run` 模式。
 
 ## 示例列表
 
@@ -38,11 +38,12 @@ python examples/publish_lesson_example.py book_sunzibingfa/lesson02 --platform w
 
 ### 1. 准备工作
 
-确保已安装 copublisher:
+**必须先安装 copublisher**（示例依赖已安装的包，不要依赖 `sys.path` 修改）:
 
 ```bash
 cd copublisher
 uv pip install -e .
+python -m copublisher verify   # 验证安装
 ```
 
 ### 2. 准备课程文件

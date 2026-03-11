@@ -2,18 +2,16 @@
 课程视频发布示例
 
 演示如何使用 copublisher 模块发布课程视频到多个平台。
+需先安装: uv pip install -e .
 
 用法:
     python examples/publish_lesson_example.py book_sunzibingfa/lesson02 --platform both
 """
 
-import sys
 import argparse
 import json
+import sys
 from pathlib import Path
-
-# 添加 copublisher 到路径
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from copublisher import (
     WeChatPublisher,

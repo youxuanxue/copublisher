@@ -147,7 +147,7 @@ src/copublisher/
 | core 不引用 application | ✅ 合规 | `core/` 仅依赖 `shared` |
 | application 不引用 interfaces | ✅ 合规 | 通过 Protocol 解耦 |
 | gui 不直接 import core | ✅ 合规 | gui 通过 application UseCase 间接访问 |
-| `__init__.py` 无 eager import | ⚠️ 部分违规 | `shared/__init__.py` 做了 eager import |
+| `__init__.py` 无 eager import | ✅ 合规 | `shared/__init__.py` 已改为 `__getattr__` 延迟加载 |
 | 无模块级副作用 | ✅ 合规 | `load_dotenv()` 和代理设置均在调用点执行 |
 
 ### 3.3 依赖异常
@@ -160,16 +160,13 @@ src/copublisher/
 
 这导致 `domain/models.py` 中的 `JobSpec` 和 `core/base.py` 中的 `PublishTask` 之间存在概念割裂——两者都是"任务定义"，却分属不同层。
 
-**问题 ②：双重发布调度路径**
+**问题 ②：双重发布调度路径** ✅ 已统一
 
-系统存在两条并行的发布调度通道：
+入口仍分两类（GUI/workflows vs job），但**底层均通过 Registry 分发**：
+- `PublishContentUseCase` → `LegacyPlatformExecutor._publish_via_registry` → Registry
+- `RunJobUseCase` → Registry 直接
 
-| 路径 | 入口 | 中间件 | 最终执行 |
-|------|------|--------|---------|
-| A: Legacy | GUI / workflows.py | `PublishContentUseCase` → `LegacyPlatformExecutor` | 直接 `new Publisher()` |
-| B: Registry | job subcommand | `RunJobUseCase` → `PublisherRegistry` → `Legacy*Adapter` | 通过 Adapter `new Publisher()` |
-
-两条路径做同样的事（创建 Publisher、调用 `publish()`），但错误处理、结果格式、幂等性支持完全不同。
+输出格式统一为 `(success, message)` / `PlatformRunOutcome`。
 
 ---
 
@@ -260,45 +257,17 @@ class PublishExecutorPort(Protocol):
 
 ### 5.1 严重问题（P0）
 
-#### P0-1：WeChatPublisher 与 PlaywrightBrowser 的职责重复
+#### P0-1：WeChatPublisher 与 PlaywrightBrowser 的职责重复 ✅ 已修复
 
-`WeChatPublisher` 完整复制了 `PlaywrightBrowser` 的浏览器生命周期管理代码（`start()`、`close()`、`_save_auth_state()`、认证文件路径构建）。而 `GzhVideoUploader` 正确地使用了组合模式。
+`WeChatPublisher` 已改为组合 `PlaywrightBrowser`，与 `GzhVideoUploader` 一致。浏览器生命周期管理委托给 `_session`。
 
-**影响**：维护两份浏览器管理逻辑，认证路径格式不一致风险（`wechat_auth_{account}.json` vs `{user_name}/gzh_auth.json`）。
+#### P0-2：双重发布调度路径 ✅ 已统一
 
-**建议**：`WeChatPublisher` 应像 `GzhVideoUploader` 一样，组合 `PlaywrightBrowser`。
+`LegacyPlatformExecutor` 已重构为 Registry 消费者，`_publish_via_registry` 统一处理所有平台。`_publish_wechat_keep_browser` 为批量微信场景的特殊优化（复用浏览器），输出格式一致为 `(success, message)`。
 
-#### P0-2：双重发布调度路径
+#### P0-3：Legacy Adapter 大量样板代码 ✅ 已提取
 
-两条路径（`LegacyPlatformExecutor` vs `PublisherRegistry` + `Legacy*Adapter`）导致：
-- 错误处理不一致：路径 A 返回 `tuple[bool, str]`，路径 B 返回 `PlatformRunOutcome`
-- 幂等性仅路径 B 支持
-- 新增平台时需在两个地方注册
-- 结果格式不同，上层消费者需分别处理
-
-**建议**：统一到 Registry 路径，将 `LegacyPlatformExecutor` 重构为 Registry 的消费者。
-
-#### P0-3：Legacy Adapter 大量样板代码
-
-7 个 `Legacy*PublisherAdapter` 类结构几乎完全相同：
-
-```python
-class LegacyXxxPublisherAdapter:
-    platform = "xxx"
-    def publish(self, *, video_path, script_data, privacy, account):
-        started = time.perf_counter()
-        try:
-            task = XxxPublishTask.from_json(video_path, script_data)
-            with XxxPublisher() as publisher:
-                success, detail = publisher.publish(task)
-            # ... 相同的成功/失败处理 ...
-        except Exception as exc:
-            # ... 相同的异常处理 ...
-```
-
-约 390 行中至少 280 行是重复结构。
-
-**建议**：提取通用的 `GenericPublisherAdapter(platform, task_factory, publisher_factory)` 模板。
+已实现 `GenericPublisherAdapter(platform, task_factory, publisher_factory)` 模板，7 个平台通过 `make_*_adapter()` 工厂注册，消除重复样板。
 
 ### 5.2 中等问题（P1）
 
@@ -315,79 +284,37 @@ class LegacyXxxPublisherAdapter:
 - `Publisher` ABC → `infrastructure/` 或提升为独立端口
 - 各 Task 类迁移到 `domain/`
 
-#### P1-2：GUI 线程安全缺陷
+#### P1-2：GUI 线程安全缺陷 ✅ 已修复
 
-```python
-class PublisherApp:
-    def __init__(self):
-        self.logs = []          # 主线程 + 后台线程并发读写
-        self.is_publishing = False  # 无锁
-```
+`PublisherApp` 已使用 `threading.Lock` 保护 `logs` 和 `is_publishing`：`add_log`、`get_logs`、`clear_logs` 及 `is_publishing` 的读写均在锁内。
 
-`publish_episode` 启动后台线程，该线程通过 `self.add_log()` 写入 `self.logs`，同时主线程 Gradio 轮询调用 `self.get_logs()` 读取。Python `list.append()` 是原子的（GIL），但 `self.logs = self.logs[-200:]` 截断不是原子操作。
+#### P1-3：`shared/__init__.py` ~~违反 eager import 规则~~ ✅ 已修复
 
-**建议**：使用 `threading.Lock` 或 `queue.Queue` 保护日志缓冲区。
+`shared/__init__.py` 已改为 `__getattr__` 延迟加载，与 `core/__init__.py` 一致。
 
-#### P1-3：`shared/__init__.py` 违反 eager import 规则
+#### P1-4：`socket.setdefaulttimeout(1800)` 全局污染 ✅ 已修复
 
-```python
-# shared/__init__.py
-from .io import atomic_write_json, atomic_write_text
-from .security import sanitize_identifier
-```
+YouTube 已使用 `RequestsHttpAdapter` 封装 `requests.Session`，超时与代理均限定在 Session 内，不再修改全局 `socket` 或 `os.environ`。
 
-虽然 `shared` 层自身无重量级依赖，但这违反了用户设定的"__init__.py 不做 eager import"规则。
+#### P1-5：环境变量全局突变 ✅ 已修复
 
-**建议**：改为 `__getattr__` 延迟加载模式，与 `core/__init__.py` 保持一致。
+YouTube 代理通过 `RequestsHttpAdapter` 的 `session.proxies` 配置，不修改 `os.environ`。
 
-#### P1-4：`socket.setdefaulttimeout(1800)` 全局污染
+#### P1-6：`publish_gzh_drafts.py` 游离于架构之外 ✅ 已融合
 
-`YouTubePublisher.authenticate()` 中设置全局 socket 超时：
-
-```python
-socket.setdefaulttimeout(1800)  # 30分钟
-```
-
-这会影响同进程中所有网络请求（包括其他平台发布器、Gradio 服务等）。
-
-**建议**：仅在 YouTube 上传时设置局部超时，或为 YouTube 使用独立的 HTTP client 配置。
-
-#### P1-5：环境变量全局突变
-
-`_setup_proxy()` 直接修改 `os.environ`：
-
-```python
-os.environ['HTTP_PROXY'] = proxy_url
-os.environ['HTTPS_PROXY'] = proxy_url
-```
-
-影响同进程所有组件。
-
-**建议**：仅在 YouTube 的 `requests.Session` 上配置代理，不修改全局环境变量。
-
-#### P1-6：`publish_gzh_drafts.py` 游离于架构之外
-
-该文件位于项目根目录，包含：
-- 硬编码路径 `/Users/xuejiao/Desktop/History/...`
-- 独立的 `GzhDraftPublisher` 类
-- Markdown → HTML 渲染逻辑
-- 未集成到 `copublisher` 包中
-
-**建议**：按照项目主架构，拆分内部，合并公共项模块，按照主项目结构进行拆分（按需迁移到 `core/`、`interfaces/cli/` 等）
+- 核心逻辑已在 `core/gzh_drafts.py`
+- 已新增子命令 `copublisher gzh-drafts <content_dir> [--skip N]`
+- 根脚本保留为薄转发层（向后兼容）
 
 #### P1-7：`src/media_publisher/` 残留
 
-`src/media_publisher/` 下存在旧包的 `.pyc` 缓存文件。虽然不影响运行，但增加混淆。
-
-**建议**：删除 `src/media_publisher/` 目录。
+已确认该目录不存在（glob 未发现），无需操作。
 
 ### 5.3 改进建议（P2）
 
-#### P2-1：`_find_config_file()` 在每个 Publisher 中重复
+#### P2-1：`_find_config_file()` ~~在每个 Publisher 中重复~~ ✅ 已提取
 
-`MediumPublisher`、`TwitterPublisher`、`DevToPublisher`、`TikTokPublisher`、`InstagramPublisher`、`YouTubePublisher` 各自实现了完全相同的 `_find_config_file()` 方法。
-
-**建议**：提取到 `shared/` 或 `Publisher` 基类。
+已提取到 `shared/config.py` 的 `find_config_file()`，各 Publisher 已统一使用。
 
 #### P2-2：返回值类型不统一
 
@@ -481,7 +408,7 @@ README 中的项目结构图仍是早期版本，未包含 `domain/`、`applicat
 | `account` 认证文件路径 | ✅ | `sanitize_identifier` 校验 |
 | `user_name` 浏览器状态路径 | ✅ | `sanitize_identifier` 校验 |
 | `org_run_id` 报告路径 | ✅ | `sanitize_identifier` 校验 |
-| `video_path` / `script_path` | ⚠️ | `JobSpec.from_payload` 仅检查文件存在性，不做路径穿越校验 |
+| `video_path` / `script_path` | ✅ | `JobSpec.from_payload` 拒绝含 `..` 的路径；`load_script_data` 1MB 限制 |
 
 ### 7.2 输入大小限制
 
@@ -489,22 +416,20 @@ README 中的项目结构图仍是早期版本，未包含 `domain/`、`applicat
 |--------|------|:---:|
 | Job 文件 (`RunJobUseCase`) | 1MB | ✅ |
 | Blue Ocean 输入 | 1MB | ✅ |
-| ep*.json (`EpisodeAdapter`) | 无限制 | ❌ |
-| script.json (CLI workflows) | 无限制 | ❌ |
-| GUI JSON 脚本输入 | 无限制 | ⚠️ |
+| ep*.json (`EpisodeAdapter`) | 10 MB | ✅ |
+| script.json (CLI workflows) | 1 MB | ✅ |
+| GUI JSON 脚本输入 | 1 MB | ✅ |
 
-### 7.3 `sanitize_identifier` 实现与文档不一致
+### 7.3 `sanitize_identifier` 实现与文档 ✅ 已对齐
 
-文档声称 "allow only ASCII letters/digits/_/-"，但实现仅拒绝 `..`、`/`、`\`。中文字符、空格、特殊符号均可通过。
-
-这是为了支持中文账号名（如"奶奶讲故事"）而有意为之，但文档应更新以反映实际行为。
+`shared/security.py` 模块与函数文档已明确说明：有意允许非 ASCII 字符（如中文账号名），不限于 ASCII letters/digits/_/-。
 
 ### 7.4 凭据安全
 
 | 凭据类型 | 存储位置 | 加密 | 权限 |
 |---------|---------|:---:|:---:|
-| 微信认证状态 | `~/.copublisher/wechat_auth*.json` | ✗ | 默认文件权限 |
-| YouTube Token | `config/youtube_token.json` | ✗ | 默认文件权限 |
+| 微信认证状态 | `~/.copublisher/wechat_auth*.json` | ✗ | 0o600 ✅ |
+| YouTube Token | `config/youtube_token.json` | ✗ | 0o600 ✅ |
 | Medium Token | `config/medium_token.txt` | ✗ | 明文 |
 | Twitter 凭据 | `config/twitter_credentials.json` | ✗ | 明文 |
 | TikTok 凭据 | `config/tiktok_credentials.json` | ✗ | 明文 |

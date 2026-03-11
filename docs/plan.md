@@ -258,7 +258,25 @@ CI 分层：
 
 ---
 
-## 9. 自检、反思、迭代记录（深度）
+## 9. 完成状态（2026-03-11 更新）
+
+| 阶段 | 完成度 | 备注 |
+|------|:---:|---|
+| M1 分层骨架 | ✅ | domain/application/infrastructure/interfaces 已搭建 |
+| M1 Job 契约 v1 | ✅ | RunResult、PlatformRunOutcome、schema 已实现 |
+| M1 错误语义 | ✅ | domain/error_codes.py 已实现 |
+| M2 平台插件化 | ✅ | PublisherRegistry、Legacy*Adapter 已实现 |
+| M2 幂等与补偿 | ✅ | IdempotencyService、ExecutionStateStore 已实现 |
+| M2 可观测 | ⚠️ | 结构化日志部分覆盖 |
+| 统一发布路径 | ✅ | LegacyPlatformExecutor 已走 Registry |
+| 根脚本融合 | ✅ | publish_gzh_drafts、verify_install 已并入 CLI |
+| P0/P1 架构问题 | ✅ | WeChatPublisher 组合、GenericAdapter、GUI 线程安全、输入限制、socket/proxy |
+
+详见 `docs/architecture-self-review.md`。
+
+---
+
+## 10. 自检、反思、迭代记录（深度）
 
 ### 第 1 轮自检：架构合理性
 - 问题：上版计划偏“功能任务清单”，缺明确分层蓝图。
@@ -276,7 +294,8 @@ CI 分层：
 - 问题：大改有兼容风险，尤其 CLI 与导入路径。
 - 修正：定义“兼容窗口 + 旧参数保留 + 老导入转发”策略。
 
-### 第 5 轮自检：目标一致性
+### 第 5 轮自检：目标一致性（plan 原记）
+
 - 检查：
   - 是否保持独立仓库执行能力：是。
   - 是否避免 blue-ocean 复制发布实现：是。
@@ -285,7 +304,7 @@ CI 分层：
 
 ---
 
-## 10. 建议执行顺序（最小返工）
+## 11. 建议执行顺序（最小返工）
 
 1. 先做分层骨架与契约冻结（M1），避免继续在重入口上加功能。
 2. 再做插件化与幂等补偿（M2），解决扩张与稳定性。

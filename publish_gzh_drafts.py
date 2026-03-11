@@ -1,77 +1,43 @@
 #!/usr/bin/env python3
 """
-微信公众号草稿批量发布入口脚本。
+微信公众号草稿批量发布入口脚本（向后兼容）。
 
-核心逻辑已迁入 copublisher.core.gzh_drafts 模块，
-本文件仅作为便捷 CLI 入口保留。
+推荐用法: python -m copublisher gzh-drafts <content_dir> [--skip N]
 
-用法：
-    python publish_gzh_drafts.py <content_dir> [--skip N]
-
-若不传参数则使用默认目录（向后兼容）。
+本脚本作为便捷入口保留：若不传参数则使用环境变量 COPUBLISHER_GZH_DEFAULT_DIR 或历史默认目录。
 """
 
-import re
+import os
 import sys
-import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-
-from copublisher.core.gzh_drafts import GzhDraftPublisher
+# 向后兼容：无参数时使用环境变量或历史默认（可通过 env 覆盖）
+_DEFAULT_CONTENT_DIR = os.environ.get(
+    "COPUBLISHER_GZH_DEFAULT_DIR",
+    "/Users/xuejiao/Desktop/History/inspur/cowork/transcript/ppt_gen/content-series",
+)
 
 
 def main():
-    if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
-        content_dir = Path(sys.argv[1])
-    else:
-        content_dir = Path(
-            "/Users/xuejiao/Desktop/History/inspur/cowork/transcript/ppt_gen/content-series"
-        )
+    argv = sys.argv[1:]
 
-    if not content_dir.exists():
-        print(f"❌ 目录不存在: {content_dir}")
+    # 无参数或仅 --skip N 时，使用默认目录以保持向后兼容
+    if not argv or (len(argv) == 2 and argv[0] == "--skip"):
+        default_dir = Path(_DEFAULT_CONTENT_DIR)
+        if not default_dir.exists():
+            print(f"❌ 默认目录不存在: {default_dir}")
+            print("   请设置 COPUBLISHER_GZH_DEFAULT_DIR 或显式指定: copublisher gzh-drafts <content_dir>")
+            sys.exit(1)
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+        from copublisher.interfaces.cli.gzh_drafts_command import run_gzh_drafts_cli
+
+        run_gzh_drafts_cli(argv, default_content_dir=default_dir)
         return
 
-    md_files = sorted(content_dir.glob("*.md"))
-    if not md_files:
-        print("❌ 没有找到 .md 文件")
-        return
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+    from copublisher.interfaces.cli.gzh_drafts_command import run_gzh_drafts_cli
 
-    skip = 0
-    if "--skip" in sys.argv:
-        idx = sys.argv.index("--skip")
-        if idx + 1 < len(sys.argv):
-            skip = int(sys.argv[idx + 1])
-
-    files_to_run = md_files[skip:]
-    total = len(files_to_run)
-    print(f"找到 {len(md_files)} 个文件，跳过前 {skip} 篇，本次处理 {total} 篇\n")
-
-    pub = GzhDraftPublisher(headless=False)
-    try:
-        pub.authenticate()
-        for i, md_file in enumerate(files_to_run, 1):
-            print(f"\n[{i}/{total}] {md_file.name}")
-            content = md_file.read_text(encoding="utf-8")
-
-            title = md_file.stem
-            m = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-            if m:
-                title = m.group(1).strip()
-                content = content.replace(m.group(0), "", 1).strip()
-
-            pub.create_draft(title=title, markdown_content=content)
-
-            if i < total:
-                print("  等待 4 秒...")
-                time.sleep(4)
-    except Exception as e:
-        print(f"\n❌ 运行出错: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        pub.close()
+    run_gzh_drafts_cli(argv)
 
 
 if __name__ == "__main__":

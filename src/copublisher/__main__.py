@@ -23,6 +23,15 @@ def main():
         run_job_subcommand(sys.argv[2:])
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "gzh-drafts":
+        from copublisher.interfaces.cli.gzh_drafts_command import run_gzh_drafts_cli
+        run_gzh_drafts_cli(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "verify":
+        run_verify_cli(sys.argv[2:])
+        return
+
     parser = argparse.ArgumentParser(
         description="火箭发射 - 多平台内容一键发布工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -197,6 +206,12 @@ def run_job_subcommand(argv: list[str]) -> None:
     from copublisher.interfaces.cli.job_command import run_job_subcommand as _impl
 
     return _impl(argv)
+
+
+def run_verify_cli(argv: list[str]) -> None:
+    from copublisher.interfaces.cli.verify_command import run_verify_cli as _impl
+
+    _impl(argv)
 
 
 def scan_batch_dir(batch_dir: Path) -> list:

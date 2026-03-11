@@ -102,9 +102,10 @@ class PublisherApp:
             wechat_account: 微信视频号账号名称
         """
         self._current_account = wechat_account.strip() or None
-        if self.is_publishing:
-            yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
-            return
+        with self._lock:
+            if self.is_publishing:
+                yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
+                return
         
         if not self.current_episode_path:
             if ep_file is None:
@@ -141,12 +142,14 @@ class PublisherApp:
                 video_file.name if hasattr(video_file, 'name') else video_file
             )
         
-        self.is_publishing = True
+        with self._lock:
+            self.is_publishing = True
         self.clear_logs()
         episode_path = self.current_episode_path
         if episode_path is None:
             self.add_log("[ERROR] 未加载 episode 路径")
-            self.is_publishing = False
+            with self._lock:
+                self.is_publishing = False
             yield self.get_logs()
             return
         episode_id_for_log = episode_path.stem if episode_path else "unknown"
@@ -177,7 +180,8 @@ class PublisherApp:
             time.sleep(0.5)
         
         thread.join(timeout=1.0)
-        self.is_publishing = False
+        with self._lock:
+            self.is_publishing = False
         yield self.get_logs()
     
     def _do_episode_publish(
@@ -208,11 +212,19 @@ class PublisherApp:
     # 传统模式（保留）
     # ============================================================
     
+    _MAX_SCRIPT_JSON_SIZE = 1 * 1024 * 1024  # 1 MB
+
     def parse_script_json(self, script_text: Optional[str], platform: str) -> tuple:
-        """解析 JSON 脚本文本"""
+        """解析 JSON 脚本文本（限制 1MB 防止 DoS）"""
         empty_result = ("", "", "", "", "", "", "", "", "")
         
         if not script_text or not script_text.strip():
+            return empty_result
+
+        if len(script_text.encode("utf-8")) > self._MAX_SCRIPT_JSON_SIZE:
+            self.add_log(
+                f"[ERROR] 脚本 JSON 过大 (上限 {self._MAX_SCRIPT_JSON_SIZE} bytes)"
+            )
             return empty_result
         
         try:
@@ -284,16 +296,18 @@ class PublisherApp:
         youtube_privacy: str,
     ):
         """传统模式发布（流式日志）"""
-        if self.is_publishing:
-            yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
-            return
+        with self._lock:
+            if self.is_publishing:
+                yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
+                return
         
         if video_file is None:
             self.add_log("[ERROR] 请选择视频文件")
             yield self.get_logs()
             return
         
-        self.is_publishing = True
+        with self._lock:
+            self.is_publishing = True
         self.clear_logs()
         self.add_log(f"[INFO] 开始发布流程... 平台: {platform}")
         yield self.get_logs()
@@ -348,7 +362,8 @@ class PublisherApp:
             self.add_log(f"[ERROR] 详细错误: {traceback.format_exc()}")
             yield self.get_logs()
         finally:
-            self.is_publishing = False
+            with self._lock:
+                self.is_publishing = False
         
         yield self.get_logs()
 

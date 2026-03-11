@@ -91,6 +91,8 @@ class JobSpec:
         script_raw = str(payload.get("script") or "").strip()
         if not video_raw or not script_raw:
             raise ValueError("video 或 script 不能为空")
+        if ".." in video_raw or ".." in script_raw:
+            raise ValueError("video 或 script 路径不能包含 ..")
 
         video_path = Path(video_raw)
         script_path = Path(script_raw)
@@ -112,7 +114,14 @@ class JobSpec:
             raw=payload,
         )
 
+    MAX_SCRIPT_SIZE = 1 * 1024 * 1024  # 1 MB
+
     def load_script_data(self) -> dict[str, Any]:
+        size = self.script_path.stat().st_size
+        if size > self.MAX_SCRIPT_SIZE:
+            raise ValueError(
+                f"script 文件过大: {size} bytes (上限 {self.MAX_SCRIPT_SIZE} bytes)"
+            )
         with self.script_path.open("r", encoding="utf-8") as f:
             return json.load(f)
 

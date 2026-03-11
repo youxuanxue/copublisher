@@ -30,7 +30,8 @@ uv run playwright install chromium
 ### 2. 验证安装
 
 ```bash
-python verify_install.py
+python -m copublisher verify
+# 或（向后兼容）: python verify_install.py
 ```
 
 ### 3. 配置 YouTube API（可选）
@@ -80,7 +81,20 @@ copublisher --video /path/to/video.mp4 --platform both --script /path/to/script.
 copublisher --video /path/to/video.mp4 --platform youtube --privacy public --script /path/to/script.json
 ```
 
-### 方式 3: Python 代码
+### 方式 3: 子命令
+
+```bash
+# 验证安装
+copublisher verify
+
+# 公众号草稿批量发布（Markdown → 图文草稿）
+copublisher gzh-drafts /path/to/md-folder [--skip N]
+
+# 结构化 Job 模式（用于调度系统）
+copublisher job run --job-file job.json --json
+```
+
+### 方式 4: Python 代码
 
 ```python
 from copublisher import (
@@ -208,7 +222,9 @@ copublisher/
 │       ├── interfaces/cli/         # CLI 接口层
 │       │   ├── job_command.py
 │       │   ├── job_runner.py
-│       │   └── workflows.py
+│       │   ├── workflows.py
+│       │   ├── gzh_drafts_command.py   # 公众号草稿批量发布
+│       │   └── verify_command.py       # 安装验证
 │       ├── gui/                    # Gradio GUI
 │       │   └── app.py
 │       └── shared/                 # 共享工具

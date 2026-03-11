@@ -14,6 +14,19 @@ from copublisher.application.usecases.publish_content import PublishContentUseCa
 from copublisher.shared.io import atomic_write_text
 
 ALL_PLATFORMS = ["wechat", "youtube", "medium", "twitter", "devto", "tiktok", "instagram"]
+_MAX_CONFIG_SIZE = 1 * 1024 * 1024  # 1 MB
+
+
+def _read_json_with_size_limit(path: Path, label: str = "配置文件") -> dict:
+    """读取 JSON 文件，限制大小防止 DoS。"""
+    size = path.stat().st_size
+    if size > _MAX_CONFIG_SIZE:
+        raise ValueError(
+            f"{label}过大: {size} bytes (上限 {_MAX_CONFIG_SIZE} bytes): {path}"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 ARTICLE_PLATFORMS = ["medium", "twitter", "devto"]
 VIDEO_PLATFORMS = ["wechat", "youtube", "tiktok", "instagram"]
 
@@ -115,12 +128,11 @@ def run_legacy_cli(args, log_callback: Callable[[str], None] = print) -> dict[st
     if not script_path.exists():
         print(f"❌ 脚本文件不存在: {script_path}")
         sys.exit(1)
-    _MAX_SCRIPT_SIZE = 1 * 1024 * 1024  # 1 MB
-    if script_path.stat().st_size > _MAX_SCRIPT_SIZE:
-        print(f"❌ 脚本文件过大 ({script_path.stat().st_size} bytes, 上限 {_MAX_SCRIPT_SIZE})")
-        sys.exit(1)
     try:
-        script_data = json.loads(script_path.read_text(encoding="utf-8"))
+        script_data = _read_json_with_size_limit(script_path, "脚本文件")
+    except ValueError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
     except json.JSONDecodeError as exc:
         print(f"❌ JSON 格式错误: {exc}")
         sys.exit(1)
@@ -172,7 +184,11 @@ def run_list_drafts(args, log_callback: Callable[[str], None] = print) -> None:
             continue
         series_name = batch_dir.name
         for video, config in pairs:
-            script_data = json.loads(config.read_text(encoding="utf-8"))
+            try:
+                script_data = _read_json_with_size_limit(config, f"配置 {config.name}")
+            except ValueError as e:
+                print(f"⚠️ 跳过 {video.name}: {e}")
+                continue
             task = WeChatPublishTask.from_json(video, script_data)
             desc = (task.get_full_description() or "").strip()[:50]
             title = (task.title or "").strip()
@@ -248,7 +264,11 @@ def run_batch_cli(args, log_callback: Callable[[str], None] = print) -> None:
     print(f"\n📂 系列目录: {batch_dir}")
     print(f"📊 共发现 {len(pairs)} 个视频\n")
     for i, (video, config) in enumerate(pairs, 1):
-        script_data = json.loads(config.read_text(encoding="utf-8"))
+        try:
+            script_data = _read_json_with_size_limit(config, f"配置 {config.name}")
+        except ValueError as e:
+            print(f"❌ {config.name}: {e}")
+            sys.exit(1)
         task = WeChatPublishTask.from_json(video, script_data)
         tasks.append(task)
         print(f"  {i:2d}. {video.name}  ->  {task.title}")
