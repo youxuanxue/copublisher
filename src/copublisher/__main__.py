@@ -192,7 +192,7 @@ def main():
 def run_gui(args):
     """启动 GUI 界面"""
     try:
-        from .gui import launch_app
+        from copublisher.interfaces.gui import launch_app
         print("🚀 正在启动火箭发射...")
         print(f"📍 访问地址: http://localhost:{args.port}")
         launch_app(share=args.share, server_port=args.port)

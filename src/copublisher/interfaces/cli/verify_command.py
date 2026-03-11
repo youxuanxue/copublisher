@@ -46,8 +46,10 @@ def _run_checks() -> bool:
         "core/base.py",
         "core/wechat.py",
         "core/youtube.py",
-        "gui/__init__.py",
-        "gui/app.py",
+        "domain/platform.py",
+        "domain/tasks.py",
+        "interfaces/gui/__init__.py",
+        "interfaces/gui/app.py",
     ]
     all_exist = True
     for rel_path in required_paths:

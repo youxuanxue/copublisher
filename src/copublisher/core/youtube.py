@@ -20,7 +20,9 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-from .base import Publisher, YouTubePublishTask
+from copublisher.domain.tasks import YouTubePublishTask
+
+from .base import Publisher
 from copublisher.shared.io import atomic_write_text
 from copublisher.shared.config import find_config_file
 

@@ -11,10 +11,14 @@ from typing import Any
 
 from copublisher.shared.security import sanitize_identifier
 
+from copublisher.domain.platform import (
+    ARTICLE_PLATFORM_STRINGS,
+    VIDEO_PLATFORM_STRINGS,
+)
 
 SUPPORTED_JOB_MODES = {"legacy"}
-VIDEO_PLATFORMS = {"wechat", "youtube", "tiktok", "instagram"}
-ARTICLE_PLATFORMS = {"medium", "twitter", "devto"}
+VIDEO_PLATFORMS = VIDEO_PLATFORM_STRINGS
+ARTICLE_PLATFORMS = ARTICLE_PLATFORM_STRINGS
 
 
 def _expand_platforms(platform_value: Any) -> list[str]:

@@ -1,4 +1,4 @@
-"""Gradio GUI 模块（向后兼容，实际实现在 interfaces.gui）。"""
+"""Gradio GUI 模块（interfaces 层，与 cli 对称）。"""
 
 from importlib import import_module
 

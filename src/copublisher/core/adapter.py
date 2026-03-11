@@ -12,12 +12,12 @@ import logging
 from pathlib import Path
 from typing import Optional, Union
 
-from .base import (
-    MediumPublishTask,
+from copublisher.domain.tasks import (
     DevToPublishTask,
-    TwitterPublishTask,
-    TikTokPublishTask,
     InstagramPublishTask,
+    MediumPublishTask,
+    TikTokPublishTask,
+    TwitterPublishTask,
     WeChatPublishTask,
     YouTubePublishTask,
 )

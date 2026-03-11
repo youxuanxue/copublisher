@@ -13,7 +13,9 @@ from typing import Optional, Callable, Tuple
 
 import requests
 
-from .base import Publisher, TikTokPublishTask
+from copublisher.domain.tasks import TikTokPublishTask
+
+from .base import Publisher
 from copublisher.shared.config import find_config_file
 
 logger = logging.getLogger(__name__)

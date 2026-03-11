@@ -10,40 +10,41 @@ import json
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
 
 import gradio as gr
 
-from ..application.usecases.publish_content import PublishContentUseCase
+from copublisher.application.usecases.publish_content import PublishContentUseCase
+from copublisher.domain.platform import VIDEO_PLATFORM_STRINGS
 
 
 class PublisherApp:
     """发布工具应用"""
-    
+
     def __init__(self):
         self._lock = threading.Lock()
         self.logs: List[str] = []
         self.is_publishing = False
         self.publish_usecase = PublishContentUseCase(log_callback=self.add_log)
         self.current_episode_path: Optional[Path] = None
-    
+
     def add_log(self, message: str):
         """添加日志（线程安全）"""
         with self._lock:
             self.logs.append(message)
             if len(self.logs) > 200:
                 self.logs = self.logs[-200:]
-    
+
     def get_logs(self) -> str:
         """获取所有日志（线程安全）"""
         with self._lock:
             return "\n".join(self.logs)
-    
+
     def clear_logs(self):
         """清空日志（线程安全）"""
         with self._lock:
             self.logs.clear()
-    
+
     def close_browser(self) -> str:
         """关闭微信浏览器"""
         try:
@@ -55,36 +56,36 @@ class PublisherApp:
         except Exception as e:
             self.add_log(f"[ERROR] 关闭浏览器失败: {e}")
         return self.get_logs()
-    
+
     # ============================================================
     # Episode 模式
     # ============================================================
-    
+
     def load_episode(self, ep_file) -> Tuple[str, str]:
         """
         加载 ep*.json 文件
-        
+
         Returns:
             (summary, preview) - 摘要信息和文章预览
         """
         if ep_file is None:
             return "请选择 ep*.json 文件", ""
-        
+
         try:
-            ep_path = Path(ep_file.name if hasattr(ep_file, 'name') else ep_file)
+            ep_path = Path(ep_file.name if hasattr(ep_file, "name") else ep_file)
             summary, preview = self.publish_usecase.load_episode_overview(
                 episode_path=ep_path
             )
             self.current_episode_path = ep_path
-            
+
             self.add_log(f"[INFO] 已加载: {ep_path.name}")
-            
+
             return summary, preview
-            
+
         except Exception as e:
             self.current_episode_path = None
             return f"加载失败: {e}", ""
-    
+
     def publish_episode(
         self,
         ep_file,
@@ -94,7 +95,7 @@ class PublisherApp:
     ):
         """
         Episode 模式发布（流式日志）
-        
+
         Args:
             ep_file: ep*.json 文件
             selected_platforms: 选中的平台列表
@@ -106,7 +107,7 @@ class PublisherApp:
             if self.is_publishing:
                 yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
                 return
-        
+
         if not self.current_episode_path:
             if ep_file is None:
                 self.add_log("[ERROR] 请先加载 ep*.json 文件")
@@ -114,22 +115,21 @@ class PublisherApp:
                 return
             # 尝试重新加载
             try:
-                ep_path = Path(ep_file.name if hasattr(ep_file, 'name') else ep_file)
+                ep_path = Path(ep_file.name if hasattr(ep_file, "name") else ep_file)
                 self.publish_usecase.load_episode_overview(episode_path=ep_path)
                 self.current_episode_path = ep_path
             except Exception as e:
                 self.add_log(f"[ERROR] 加载 ep*.json 失败: {e}")
                 yield self.get_logs()
                 return
-        
+
         if not selected_platforms:
             self.add_log("[ERROR] 请至少选择一个发布平台")
             yield self.get_logs()
             return
-        
-        # 检查视频平台是否有视频文件
-        video_platforms = ["wechat", "youtube", "tiktok", "instagram"]
-        need_video = [p for p in selected_platforms if p in video_platforms]
+
+        # 检查视频平台是否有视频文件（使用 domain 单一数据源）
+        need_video = [p for p in selected_platforms if p in VIDEO_PLATFORM_STRINGS]
         video_path = None
         if need_video:
             if video_file is None:
@@ -139,9 +139,9 @@ class PublisherApp:
                 yield self.get_logs()
                 return
             video_path = Path(
-                video_file.name if hasattr(video_file, 'name') else video_file
+                video_file.name if hasattr(video_file, "name") else video_file
             )
-        
+
         with self._lock:
             self.is_publishing = True
         self.clear_logs()
@@ -158,32 +158,35 @@ class PublisherApp:
             f"到 {', '.join(selected_platforms)}"
         )
         yield self.get_logs()
-        
+
         # 在后台线程发布
         operation_done = threading.Event()
-        
+
         def run_publish():
             try:
-                self._do_episode_publish(episode_path, selected_platforms, video_path)
+                self._do_episode_publish(
+                    episode_path, selected_platforms, video_path
+                )
             except Exception as e:
                 self.add_log(f"[ERROR] 发布异常: {e}")
                 import traceback
+
                 self.add_log(f"[ERROR] {traceback.format_exc()}")
             finally:
                 operation_done.set()
-        
+
         thread = threading.Thread(target=run_publish, daemon=True)
         thread.start()
-        
+
         while not operation_done.is_set():
             yield self.get_logs()
             time.sleep(0.5)
-        
+
         thread.join(timeout=1.0)
         with self._lock:
             self.is_publishing = False
         yield self.get_logs()
-    
+
     def _do_episode_publish(
         self,
         episode_path: Path,
@@ -199,7 +202,7 @@ class PublisherApp:
             account=getattr(self, "_current_account", None),
             keep_wechat_browser_open=True,
         )
-        
+
         # 汇总
         self.add_log(f"\n{'='*50}")
         self.add_log("[INFO] 发布结果汇总")
@@ -207,17 +210,17 @@ class PublisherApp:
         for platform, (success, detail) in results.items():
             status = "✅" if success else "❌"
             self.add_log(f"  {status} {platform}: {detail or '(无详情)'}")
-    
+
     # ============================================================
     # 传统模式（保留）
     # ============================================================
-    
+
     _MAX_SCRIPT_JSON_SIZE = 1 * 1024 * 1024  # 1 MB
 
     def parse_script_json(self, script_text: Optional[str], platform: str) -> tuple:
         """解析 JSON 脚本文本（限制 1MB 防止 DoS）"""
         empty_result = ("", "", "", "", "", "", "", "", "")
-        
+
         if not script_text or not script_text.strip():
             return empty_result
 
@@ -226,61 +229,72 @@ class PublisherApp:
                 f"[ERROR] 脚本 JSON 过大 (上限 {self._MAX_SCRIPT_JSON_SIZE} bytes)"
             )
             return empty_result
-        
+
         try:
             data = json.loads(script_text)
-            
+
             wechat_title = ""
             wechat_description = ""
             wechat_hashtags = ""
             wechat_heji = ""
             wechat_huodong = ""
-            
-            wechat_data = data.get('wechat', {})
+
+            wechat_data = data.get("wechat", {})
             if wechat_data:
-                wechat_title = wechat_data.get('title', '')
-                wechat_description = wechat_data.get('description', '')
-                hashtags_list = wechat_data.get('hashtags', [])
-                wechat_hashtags = ' '.join(hashtags_list)
-                wechat_heji = wechat_data.get('heji', '')
-                wechat_huodong = wechat_data.get('huodong', '')
-            
+                wechat_title = wechat_data.get("title", "")
+                wechat_description = wechat_data.get("description", "")
+                hashtags_list = wechat_data.get("hashtags", [])
+                wechat_hashtags = " ".join(hashtags_list)
+                wechat_heji = wechat_data.get("heji", "")
+                wechat_huodong = wechat_data.get("huodong", "")
+
             youtube_title = ""
             youtube_description = ""
             youtube_tags = ""
             youtube_playlist = ""
-            
-            youtube_data = data.get('youtube', {})
+
+            youtube_data = data.get("youtube", {})
             if not youtube_data and wechat_data:
-                youtube_title = wechat_data.get('title', '')
-                youtube_description = wechat_data.get('description', '')
-                hashtags = wechat_data.get('hashtags', [])
-                tags = [tag.replace('#', '') for tag in hashtags if tag.startswith('#')]
-                youtube_tags = ', '.join(tags)
+                youtube_title = wechat_data.get("title", "")
+                youtube_description = wechat_data.get("description", "")
+                hashtags = wechat_data.get("hashtags", [])
+                tags = [
+                    tag.replace("#", "")
+                    for tag in hashtags
+                    if tag.startswith("#")
+                ]
+                youtube_tags = ", ".join(tags)
             elif youtube_data:
-                youtube_title = youtube_data.get('title', '')
-                youtube_description = youtube_data.get('description', '')
-                tags_list = youtube_data.get('tags', youtube_data.get('hashtags', []))
-                tags_list = [tag.replace('#', '').strip() for tag in tags_list]
-                youtube_tags = ', '.join(tags_list)
-                youtube_playlist = youtube_data.get('playlists', '')
-            
+                youtube_title = youtube_data.get("title", "")
+                youtube_description = youtube_data.get("description", "")
+                tags_list = youtube_data.get("tags", youtube_data.get("hashtags", []))
+                tags_list = [tag.replace("#", "").strip() for tag in tags_list]
+                youtube_tags = ", ".join(tags_list)
+                youtube_playlist = youtube_data.get("playlists", "")
+
             self.add_log("[INFO] ✅ JSON 格式正确，已解析脚本")
-            
-            return (wechat_title, wechat_description, wechat_hashtags,
-                    wechat_heji, wechat_huodong,
-                    youtube_title, youtube_description, youtube_tags,
-                    youtube_playlist)
-            
+
+            return (
+                wechat_title,
+                wechat_description,
+                wechat_hashtags,
+                wechat_heji,
+                wechat_huodong,
+                youtube_title,
+                youtube_description,
+                youtube_tags,
+                youtube_playlist,
+            )
+
         except json.JSONDecodeError as e:
             self.add_log(f"[ERROR] JSON 格式错误: {e}")
             return empty_result
         except Exception as e:
             self.add_log(f"[ERROR] 解析脚本失败: {e}")
             return empty_result
-    
+
     def publish_legacy(
-        self, 
+        self,
         video_file,
         platform: str,
         wechat_account: str,
@@ -300,27 +314,31 @@ class PublisherApp:
             if self.is_publishing:
                 yield self.get_logs() + "\n[WARNING] 正在发布中，请等待..."
                 return
-        
+
         if video_file is None:
             self.add_log("[ERROR] 请选择视频文件")
             yield self.get_logs()
             return
-        
+
         with self._lock:
             self.is_publishing = True
         self.clear_logs()
         self.add_log(f"[INFO] 开始发布流程... 平台: {platform}")
         yield self.get_logs()
-        
+
         try:
             video_path = Path(
-                video_file.name if hasattr(video_file, 'name') else video_file
+                video_file.name if hasattr(video_file, "name") else video_file
             )
             hashtags_list = [
-                tag.strip() for tag in (wechat_hashtags or "").split() if tag.strip()
+                tag.strip()
+                for tag in (wechat_hashtags or "").split()
+                if tag.strip()
             ]
             youtube_tags_list = [
-                tag.strip() for tag in (youtube_tags or "").split(",") if tag.strip()
+                tag.strip()
+                for tag in (youtube_tags or "").split(",")
+                if tag.strip()
             ]
             script_data = {
                 "wechat": {
@@ -355,33 +373,34 @@ class PublisherApp:
                 status = "✅" if success else "❌"
                 self.add_log(f"  {status} {platform_name}: {detail or '(无详情)'}")
             yield self.get_logs()
-            
+
         except Exception as e:
             self.add_log(f"[ERROR] 发布失败: {e}")
             import traceback
+
             self.add_log(f"[ERROR] 详细错误: {traceback.format_exc()}")
             yield self.get_logs()
         finally:
             with self._lock:
                 self.is_publishing = False
-        
+
         yield self.get_logs()
 
 
 def create_app() -> gr.Blocks:
     """创建 Gradio 应用"""
-    
+
     app_instance = PublisherApp()
-    
+
     with gr.Blocks(
         title="火箭发射",
         theme=gr.themes.Soft(),
         css="""
         .main-container { max-width: 1000px; margin: 0 auto; }
         .publish-btn { height: 50px !important; font-size: 18px !important; }
-        """
+        """,
     ) as app:
-        
+
         with gr.Row():
             with gr.Column(scale=1, min_width=120):
                 gr.Markdown("# 🚀 火箭发射\n多平台发布工具")
@@ -391,7 +410,7 @@ def create_app() -> gr.Blocks:
                     "选择 **Episode 模式** 从 ep*.json 发布，"
                     "或 **传统模式** 手动填写参数发布"
                 )
-        
+
         with gr.Tabs():
             # ============================================================
             # Tab 1: Episode 模式
@@ -409,25 +428,29 @@ def create_app() -> gr.Blocks:
                         load_ep_btn = gr.Button(
                             "📖 加载素材", variant="secondary"
                         )
-                        
+
                         ep_summary = gr.Textbox(
                             label="📋 素材信息",
                             lines=5,
                             interactive=False,
                         )
-                    
+
                     with gr.Column(scale=1):
                         ep_platform_checkboxes = gr.CheckboxGroup(
                             choices=[
-                                "medium", "twitter", "devto",
-                                "tiktok", "instagram",
-                                "wechat", "youtube",
+                                "medium",
+                                "twitter",
+                                "devto",
+                                "tiktok",
+                                "instagram",
+                                "wechat",
+                                "youtube",
                             ],
                             value=["medium", "twitter"],
                             label="🎯 发布平台",
                             info="文章类无需视频，视频类需上传视频文件",
                         )
-                        
+
                         ep_video_input = gr.File(
                             label="📹 视频文件 (视频平台需要)",
                             file_types=[".mp4", ".mov", ".avi"],
@@ -435,20 +458,20 @@ def create_app() -> gr.Blocks:
                             file_count="single",
                             height=100,
                         )
-                        
+
                         ep_account_input = gr.Textbox(
                             label="📌 微信账号名称 (区分多账号)",
                             placeholder="如：奶奶讲故事",
                             max_lines=1,
                         )
-                
+
                 ep_preview = gr.Textbox(
                     label="📝 文章预览 (overseas_blog)",
                     lines=6,
                     max_lines=8,
                     interactive=False,
                 )
-                
+
                 with gr.Row():
                     ep_publish_btn = gr.Button(
                         "🚀 发布",
@@ -462,7 +485,7 @@ def create_app() -> gr.Blocks:
                         elem_classes=["publish-btn"],
                         scale=1,
                     )
-                
+
                 # 绑定事件
                 load_ep_btn.click(
                     fn=app_instance.load_episode,
@@ -470,32 +493,36 @@ def create_app() -> gr.Blocks:
                     outputs=[ep_summary, ep_preview],
                     api_name=False,
                 )
-                
+
                 ep_publish_btn.click(
                     fn=app_instance.publish_episode,
                     inputs=[
-                        ep_file_input, ep_platform_checkboxes, ep_video_input,
+                        ep_file_input,
+                        ep_platform_checkboxes,
+                        ep_video_input,
                         ep_account_input,
                     ],
-                    outputs=[gr.Textbox(
-                        label="",
-                        lines=15,
-                        max_lines=15,
-                        interactive=False,
-                        show_label=False,
-                        autoscroll=True,
-                        elem_id="ep_log_output",
-                    )],
+                    outputs=[
+                        gr.Textbox(
+                            label="",
+                            lines=15,
+                            max_lines=15,
+                            interactive=False,
+                            show_label=False,
+                            autoscroll=True,
+                            elem_id="ep_log_output",
+                        )
+                    ],
                     api_name=False,
                 )
-                
+
                 ep_close_btn.click(
                     fn=app_instance.close_browser,
                     inputs=[],
                     outputs=[],
                     api_name=False,
                 )
-            
+
             # ============================================================
             # Tab 2: 传统模式
             # ============================================================
@@ -508,7 +535,7 @@ def create_app() -> gr.Blocks:
                         info="选择要发布到的平台",
                         scale=1,
                     )
-                    
+
                     video_input = gr.File(
                         label="📹 视频文件 (必需)",
                         file_types=[".mp4", ".mov", ".avi"],
@@ -517,7 +544,7 @@ def create_app() -> gr.Blocks:
                         scale=1,
                         height=200,
                     )
-                    
+
                     with gr.Column(scale=2):
                         script_input = gr.Textbox(
                             label="📄 脚本 (JSON 格式)",
@@ -528,7 +555,7 @@ def create_app() -> gr.Blocks:
                         parse_script_btn = gr.Button(
                             "✅ 确认脚本", variant="secondary", size="sm"
                         )
-                
+
                 with gr.Group(visible=True) as wechat_group:
                     gr.Markdown("### 📱 微信视频号")
                     with gr.Row():
@@ -567,7 +594,7 @@ def create_app() -> gr.Blocks:
                             placeholder="活动名称...",
                             max_lines=1,
                         )
-                
+
                 with gr.Group(visible=False) as youtube_group:
                     gr.Markdown("### 📺 YouTube Shorts")
                     with gr.Row():
@@ -601,7 +628,7 @@ def create_app() -> gr.Blocks:
                             label="隐私设置",
                             scale=1,
                         )
-                
+
                 with gr.Row():
                     legacy_publish_btn = gr.Button(
                         "🚀 发布",
@@ -615,7 +642,7 @@ def create_app() -> gr.Blocks:
                         elem_classes=["publish-btn"],
                         scale=1,
                     )
-                
+
                 # 平台切换
                 def update_platform_visibility(platform):
                     wechat_visible = gr.update(
@@ -628,61 +655,72 @@ def create_app() -> gr.Blocks:
                         visible=platform in ["wechat", "both"]
                     )
                     return wechat_visible, youtube_visible, close_btn_visible
-                
+
                 platform_radio.change(
                     fn=update_platform_visibility,
                     inputs=[platform_radio],
                     outputs=[wechat_group, youtube_group, legacy_close_btn],
                     api_name=False,
                 )
-                
+
                 parse_script_btn.click(
                     fn=lambda s, p: app_instance.parse_script_json(s, p),
                     inputs=[script_input, platform_radio],
                     outputs=[
-                        wechat_title_input, wechat_description_input,
-                        wechat_hashtags_input, wechat_heji_input,
+                        wechat_title_input,
+                        wechat_description_input,
+                        wechat_hashtags_input,
+                        wechat_heji_input,
                         wechat_huodong_input,
-                        youtube_title_input, youtube_description_input,
-                        youtube_tags_input, youtube_playlist_input,
+                        youtube_title_input,
+                        youtube_description_input,
+                        youtube_tags_input,
+                        youtube_playlist_input,
                     ],
                     api_name=False,
                 )
-                
+
                 legacy_publish_btn.click(
                     fn=app_instance.publish_legacy,
                     inputs=[
-                        video_input, platform_radio,
+                        video_input,
+                        platform_radio,
                         wechat_account_input,
-                        wechat_title_input, wechat_description_input,
-                        wechat_hashtags_input, wechat_heji_input,
+                        wechat_title_input,
+                        wechat_description_input,
+                        wechat_hashtags_input,
+                        wechat_heji_input,
                         wechat_huodong_input,
-                        youtube_title_input, youtube_description_input,
-                        youtube_tags_input, youtube_playlist_input,
+                        youtube_title_input,
+                        youtube_description_input,
+                        youtube_tags_input,
+                        youtube_playlist_input,
                         youtube_privacy_dropdown,
                     ],
-                    outputs=[gr.Textbox(
-                        label="",
-                        lines=15,
-                        max_lines=15,
-                        interactive=False,
-                        show_label=False,
-                        autoscroll=True,
-                        elem_id="legacy_log_output",
-                    )],
+                    outputs=[
+                        gr.Textbox(
+                            label="",
+                            lines=15,
+                            max_lines=15,
+                            interactive=False,
+                            show_label=False,
+                            autoscroll=True,
+                            elem_id="legacy_log_output",
+                        )
+                    ],
                     api_name=False,
                 )
-                
+
                 legacy_close_btn.click(
                     fn=app_instance.close_browser,
                     inputs=[],
                     outputs=[],
                     api_name=False,
                 )
-        
+
         # 共用日志区域
         gr.Markdown("### 📋 日志")
-        
+
         log_output = gr.Textbox(
             label="",
             lines=15,
@@ -691,14 +729,14 @@ def create_app() -> gr.Blocks:
             show_label=False,
             autoscroll=True,
         )
-    
+
     return app
 
 
 def launch_app(share: bool = False, server_port: int = 7860):
     """
     启动应用
-    
+
     Args:
         share: 是否生成公开链接
         server_port: 服务端口
@@ -707,5 +745,5 @@ def launch_app(share: bool = False, server_port: int = 7860):
     app.launch(
         share=share,
         server_port=server_port,
-        inbrowser=True
+        inbrowser=True,
     )

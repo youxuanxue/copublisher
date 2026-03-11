@@ -1,17 +1,17 @@
 # 📹 Copublisher
 
-一键发布视频到多个短视频平台，支持微信视频号和YouTube Shorts。
+多平台内容一键发布：视频（微信视频号、YouTube Shorts、TikTok、Instagram Reels）+ 文章（Medium、Twitter/X、Dev.to）。
 
 ## ✨ 功能特性
 
-- 🎯 **多平台支持**: 同时支持微信视频号和YouTube Shorts
-- 🎨 **简洁 GUI**: 基于 Gradio 的 Web 界面，操作简单直观
-- 📄 **脚本支持**: 支持从 JSON 文件自动读取发布信息
+- 🎯 **多平台**: 视频 4（微信、YouTube、TikTok、Instagram）+ 文章 3（Medium、Twitter、Dev.to）
+- 🎨 **GUI**: Gradio 界面，传统模式与 Episode 模式（ep*.json）
+- 📄 **多种用法**: 传统（--video + --script）、批量（--batch-dir）、Episode（--episode）、Job 模式（调度系统）
 - 🔐 **登录记忆**: 自动保存登录状态，无需重复认证
-- 📦 **合集支持**: 微信视频号可自动选择合集
-- 🎪 **活动支持**: 微信视频号可自动参加平台活动
-- 📋 **播放列表**: YouTube 可自动添加到播放列表
-- 💻 **命令行模式**: 支持命令行直接发布
+- 📦 **合集/播放列表**: 微信视频号合集、YouTube 播放列表
+- 💻 **CLI + SDK**: 命令行与 Python API，支持 `copublisher job run` 与 Blue Ocean 集成
+
+**适用场景**：个人/团队多平台发布、课程/系列批量发布、与调度系统（如 Blue Ocean）集成。
 
 ## 🚀 快速开始
 
@@ -34,6 +34,8 @@ python -m copublisher verify
 # 或（向后兼容）: python verify_install.py
 ```
 
+更多示例与运行方式见 [examples/README.md](examples/README.md)。
+
 ### 3. 配置 YouTube API（可选）
 
 如果需要发布到 YouTube Shorts，需要先配置 YouTube API：
@@ -50,35 +52,43 @@ python -m copublisher verify
 ### 方式 1: GUI 界面
 
 ```bash
-# 启动 GUI
+# 启动 GUI（默认端口 7860）
 copublisher
-
-# 或使用 Python 模块
+# 或
 python -m copublisher
 
-# 指定端口
+# 指定端口（例如 8080）
 copublisher --port 8080
 
 # 如遇 localhost 问题，使用 share 模式
 copublisher --share
 ```
 
-启动后会自动打开浏览器访问 `http://localhost:7860`。
+启动后访问 `http://localhost:7860`（或所指定端口）。
 
-### 方式 2: 命令行模式（推荐）
+### 方式 2: 命令行
+
+**传统模式**（单视频 + script.json）：
 
 ```bash
-# 发布到微信视频号
 copublisher --video /path/to/video.mp4 --platform wechat --script /path/to/script.json
-
-# 发布到 YouTube Shorts
 copublisher --video /path/to/video.mp4 --platform youtube --script /path/to/script.json
-
-# 同时发布到两个平台
 copublisher --video /path/to/video.mp4 --platform both --script /path/to/script.json
-
-# 设置 YouTube 为公开
 copublisher --video /path/to/video.mp4 --platform youtube --privacy public --script /path/to/script.json
+```
+
+**批量模式**（系列目录，自动匹配 output/*-Clip.mp4 与 config/*-Strategy.json）：
+
+```bash
+copublisher --batch-dir /path/to/series/yingxiongernv --platform wechat --account 奶奶讲故事
+```
+
+**Episode 模式**（从 ep*.json 发布到多平台）：
+
+```bash
+copublisher --episode ep01.json --platform medium,twitter
+copublisher --episode ep01.json --platform all-articles   # Medium + Twitter + Dev.to
+copublisher --episode ep01.json --platform all-videos     # 微信 + YouTube + TikTok + Instagram
 ```
 
 ### 方式 3: 子命令
@@ -93,6 +103,21 @@ copublisher gzh-drafts /path/to/md-folder [--skip N]
 # 结构化 Job 模式（用于调度系统）
 copublisher job run --job-file job.json --json
 ```
+
+**Job 文件 (job.json) 最小示例**（用于调度/集成）：
+
+```json
+{
+  "job_id": "run1",
+  "mode": "legacy",
+  "platforms": ["wechat", "youtube"],
+  "video": "/path/to/video.mp4",
+  "script": "/path/to/script.json",
+  "privacy": "private"
+}
+```
+
+输出为 JSON（`--json`），字段含 `status`、`platforms`、`retryable` 等；完整 schema 与错误码见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ### 方式 4: Python 代码
 
@@ -159,6 +184,8 @@ with YouTubePublisher() as publisher:
 | `playlists` | 否 | 播放列表名称（不存在会自动创建）|
 | `privacy` | 否 | 隐私设置：`public`、`unlisted`、`private`（默认）|
 
+其他平台（Medium、Twitter、Dev.to、TikTok、Instagram）的 script 结构见 [examples/README.md](examples/README.md) 或各平台对应字段（如 `medium`、`twitter`、`devto` 等）。
+
 ## 🔐 认证状态保存
 
 ### 微信视频号
@@ -180,102 +207,12 @@ config/youtube_credentials.json  # OAuth2 客户端凭据（需手动配置）
 config/youtube_token.json        # 访问令牌（自动生成）
 ```
 
-## 🛠️ 项目结构
+## 🛠️ 代码与集成
 
-```
-copublisher/
-├── pyproject.toml                  # 项目配置 (hatchling)
-├── README.md
-├── src/
-│   └── copublisher/
-│       ├── __init__.py             # 包入口（lazy export）
-│       ├── __main__.py             # CLI 入口 + 参数解析
-│       ├── domain/                 # 领域模型
-│       │   ├── models.py           #   JobSpec
-│       │   ├── result.py           #   RunResult / PlatformRunOutcome
-│       │   └── error_codes.py      #   ErrorCode 枚举 + 重试策略
-│       ├── application/            # 应用层 (UseCase + 服务)
-│       │   ├── usecases/
-│       │   │   ├── publish_content.py  # PublishContentUseCase
-│       │   │   └── run_job.py          # RunJobUseCase
-│       │   └── services/
-│       │       ├── idempotency_service.py
-│       │       ├── result_builder.py
-│       │       ├── org_run_reporter.py
-│       │       └── blue_ocean_adapter.py
-│       ├── infrastructure/         # 基础设施层
-│       │   ├── registry.py         #   PublisherRegistry + build_default_registry
-│       │   ├── publishers/
-│       │   │   ├── executor.py     #   LegacyPlatformExecutor (Registry 驱动)
-│       │   │   └── legacy.py       #   GenericPublisherAdapter
-│       │   └── state_store/
-│       │       └── json_store.py   #   ExecutionStateStore
-│       ├── core/                   # 核心发布模块
-│       │   ├── base.py             #   Platform 枚举 + PublishTask + Publisher ABC
-│       │   ├── adapter.py          #   EpisodeAdapter
-│       │   ├── browser.py          #   PlaywrightBrowser
-│       │   ├── wechat.py           #   WeChatPublisher (组合 PlaywrightBrowser)
-│       │   ├── youtube.py          #   YouTubePublisher
-│       │   ├── medium.py / twitter.py / devto.py / tiktok.py / instagram.py
-│       │   ├── gzh.py / gzh_video.py / gzh_drafts.py
-│       │   └── ...
-│       ├── interfaces/cli/         # CLI 接口层
-│       │   ├── job_command.py
-│       │   ├── job_runner.py
-│       │   ├── workflows.py
-│       │   ├── gzh_drafts_command.py   # 公众号草稿批量发布
-│       │   └── verify_command.py       # 安装验证
-│       ├── gui/                    # Gradio GUI
-│       │   └── app.py
-│       └── shared/                 # 共享工具
-│           ├── io.py               #   atomic_write_text / atomic_write_json
-│           ├── security.py         #   sanitize_identifier
-│           └── config.py           #   find_config_file
-├── tests/                          # 测试
-├── examples/
-│   └── publish_lesson_example.py
-└── docs/
-```
-
-## 📦 集成到其他项目
-
-### 安装
-
-```bash
-cd copublisher
-uv pip install -e .
-```
-
-### 导入使用
-
-```python
-from copublisher import (
-    Platform,
-    WeChatPublisher,
-    YouTubePublisher,
-    WeChatPublishTask,
-    YouTubePublishTask,
-)
-```
-
-### 迁移旧代码
-
-如果之前使用 `src/publish/` 中的发布模块，更新导入：
-
-```python
-# 旧的导入
-# from src.publish.wx_channel import WeChatChannelPublisher, VideoPublishTask
-# from src.publish.youtube_publisher import YouTubePublisher, YouTubePublishTask
-
-# 新的导入
-from copublisher import WeChatPublisher, WeChatPublishTask
-from copublisher import YouTubePublisher, YouTubePublishTask
-```
-
-类名变更：
-- `WeChatChannelPublisher` → `WeChatPublisher`
-- `VideoPublishTask` → `WeChatPublishTask`
-- `login()` → `authenticate()`
+- **目录与架构约定**（依赖规则、Job schema）：[ARCHITECTURE.md](ARCHITECTURE.md)
+- **示例**：[examples/README.md](examples/README.md)
+- **集成**：`uv pip install -e .` 后 `from copublisher import WeChatPublisher, YouTubePublisher, WeChatPublishTask, YouTubePublishTask`
+- **旧版迁移**：`WeChatChannelPublisher`→`WeChatPublisher`，`VideoPublishTask`→`WeChatPublishTask`，`login()`→`authenticate()`
 
 ## ❓ 常见问题
 
@@ -285,11 +222,7 @@ from copublisher import YouTubePublisher, YouTubePublishTask
 ModuleNotFoundError: No module named 'copublisher'
 ```
 
-**解决**: 确保已安装模块：
-```bash
-cd copublisher
-uv pip install -e .
-```
+**解决**: 完成上方「安装」步骤后，在项目根目录执行 `uv pip install -e .`。
 
 ### Playwright 浏览器无法启动
 
@@ -314,7 +247,7 @@ copublisher --share
 
 ### 微信视频号需要手动点击发布
 
-是的，出于安全考虑，程序会自动填写所有信息，但最后的"发布"按钮需要人工确认。
+是的，出于安全考虑需人工点击「发布」。详见下方「注意事项」。
 
 ## ⚠️ 注意事项
 

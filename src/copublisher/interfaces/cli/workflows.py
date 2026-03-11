@@ -11,9 +11,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from copublisher.application.usecases.publish_content import PublishContentUseCase
+from copublisher.domain.platform import (
+    ALL_PLATFORM_STRINGS,
+    ARTICLE_PLATFORM_STRINGS,
+    VIDEO_PLATFORM_STRINGS,
+)
 from copublisher.shared.io import atomic_write_text, read_json_with_size_limit
 
-ALL_PLATFORMS = ["wechat", "youtube", "medium", "twitter", "devto", "tiktok", "instagram"]
+ALL_PLATFORMS = sorted(ALL_PLATFORM_STRINGS)
 _MAX_CONFIG_SIZE = 1 * 1024 * 1024  # 1 MB
 
 
@@ -22,8 +27,8 @@ def _read_json_with_size_limit(path: Path, label: str = "配置文件") -> dict:
     return read_json_with_size_limit(path, _MAX_CONFIG_SIZE, label)
 
 
-ARTICLE_PLATFORMS = ["medium", "twitter", "devto"]
-VIDEO_PLATFORMS = ["wechat", "youtube", "tiktok", "instagram"]
+ARTICLE_PLATFORMS = sorted(ARTICLE_PLATFORM_STRINGS)
+VIDEO_PLATFORMS = sorted(VIDEO_PLATFORM_STRINGS)
 
 
 def parse_platform_arg(platform_str: str) -> list[str]:

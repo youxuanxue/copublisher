@@ -11,7 +11,9 @@ import time
 from pathlib import Path
 from typing import Optional, Callable, List, Tuple
 
-from .base import Publisher, WeChatPublishTask
+from copublisher.domain.tasks import WeChatPublishTask
+
+from .base import Publisher
 from .browser import PlaywrightBrowser
 
 logger = logging.getLogger(__name__)

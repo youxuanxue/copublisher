@@ -14,7 +14,9 @@ from typing import Optional, Callable, Tuple, List
 import requests
 from requests_oauthlib import OAuth1
 
-from .base import Publisher, TwitterPublishTask
+from copublisher.domain.tasks import TwitterPublishTask
+
+from .base import Publisher
 from copublisher.shared.config import find_config_file
 
 logger = logging.getLogger(__name__)

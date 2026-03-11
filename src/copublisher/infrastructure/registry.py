@@ -65,6 +65,17 @@ class PublisherRegistry:
     def list_platforms(self) -> list[str]:
         return sorted(self._entries.keys())
 
+    def list_platforms_by_content_type(self, content_type: str) -> list[str]:
+        """按内容类型筛选平台（video | article）。"""
+        ct = (content_type or "").strip().lower()
+        if not ct:
+            return self.list_platforms()
+        return sorted(
+            p
+            for p in self._entries
+            if self._entries[p].capabilities.get("content") == ct
+        )
+
 
 def build_default_registry() -> PublisherRegistry:
     from copublisher.infrastructure.publishers.legacy import (

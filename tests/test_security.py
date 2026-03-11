@@ -1,7 +1,8 @@
 import unittest
+
+import pytest
 from pathlib import Path
 
-from copublisher.core.browser import PlaywrightBrowser
 from copublisher.shared.security import sanitize_identifier
 
 
@@ -17,18 +18,24 @@ class SecurityValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sanitize_identifier("a/b")
 
+    @pytest.mark.integration
     def test_browser_rejects_unsafe_user_name(self):
+        from copublisher.core.browser import PlaywrightBrowser
         with self.assertRaises(ValueError):
             PlaywrightBrowser(platform_name="wechat", user_name="../x")
 
+    @pytest.mark.integration
     def test_browser_auth_path_uses_sanitized_user_name(self):
+        from copublisher.core.browser import PlaywrightBrowser
         browser = PlaywrightBrowser(platform_name="wechat", user_name="teamA_01")
         p = browser.auth_file_path
         self.assertIsInstance(p, Path)
         self.assertIn("wechat_auth.json", str(p))
         self.assertIn("teamA_01", str(p))
 
+    @pytest.mark.integration
     def test_browser_auth_path_without_user_name(self):
+        from copublisher.core.browser import PlaywrightBrowser
         browser = PlaywrightBrowser(platform_name="wechat")
         p = browser.auth_file_path
         self.assertIsInstance(p, Path)

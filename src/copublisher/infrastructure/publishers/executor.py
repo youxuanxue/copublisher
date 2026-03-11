@@ -162,7 +162,8 @@ class LegacyPlatformExecutor:
         script_data: dict,
         account: str | None,
     ) -> tuple[bool, str]:
-        from copublisher.core import WeChatPublishTask, WeChatPublisher
+        from copublisher.domain.tasks import WeChatPublishTask
+        from copublisher.core import WeChatPublisher
 
         task = WeChatPublishTask.from_json(video_path, script_data)
         if self.wechat_publisher is None:
@@ -235,7 +236,8 @@ class LegacyPlatformExecutor:
         account: str | None,
     ) -> tuple[str, list[tuple[str, str, str, str]], Path | None]:
         """获取微信草稿箱全文，并与预期列表对比。返回 (draft_full_text, expected, dump_dir)。"""
-        from copublisher.core import WeChatPublishTask, WeChatPublisher
+        from copublisher.domain.tasks import WeChatPublishTask
+        from copublisher.core import WeChatPublisher
 
         expected: list[tuple[str, str, str, str]] = []
         for batch_dir in batch_dirs:
@@ -275,7 +277,8 @@ class LegacyPlatformExecutor:
         account: str | None,
     ) -> list[tuple[bool, str]]:
         """微信视频号批量发布。pairs: (video_path, config_path)。"""
-        from copublisher.core import WeChatPublishTask, WeChatPublisher
+        from copublisher.domain.tasks import WeChatPublishTask
+        from copublisher.core import WeChatPublisher
 
         tasks = []
         for video, config in pairs:

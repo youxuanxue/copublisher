@@ -93,19 +93,19 @@ class GenericPublisherAdapter:
 # ── Per-platform task factories ──────────────────────────────────────
 
 def _wechat_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import WeChatPublishTask
+    from copublisher.domain.tasks import WeChatPublishTask
     return WeChatPublishTask.from_json(video_path, script_data)
 
 
 def _youtube_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import YouTubePublishTask
+    from copublisher.domain.tasks import YouTubePublishTask
     task = YouTubePublishTask.from_json(video_path, script_data)
     task.privacy_status = privacy
     return task
 
 
 def _medium_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import MediumPublishTask
+    from copublisher.domain.tasks import MediumPublishTask
     d = script_data.get("medium", {})
     return MediumPublishTask(
         title=d.get("title", ""),
@@ -117,7 +117,7 @@ def _medium_task(*, video_path, script_data, privacy, account):
 
 
 def _twitter_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import TwitterPublishTask
+    from copublisher.domain.tasks import TwitterPublishTask
     d = script_data.get("twitter", {})
     tweets = d.get("tweets", [])
     if isinstance(tweets, str):
@@ -130,7 +130,7 @@ def _twitter_task(*, video_path, script_data, privacy, account):
 
 
 def _devto_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import DevToPublishTask
+    from copublisher.domain.tasks import DevToPublishTask
     d = script_data.get("devto", {})
     return DevToPublishTask(
         title=d.get("title", ""),
@@ -143,12 +143,12 @@ def _devto_task(*, video_path, script_data, privacy, account):
 
 
 def _tiktok_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import TikTokPublishTask
+    from copublisher.domain.tasks import TikTokPublishTask
     return TikTokPublishTask.from_json(video_path, script_data)
 
 
 def _instagram_task(*, video_path, script_data, privacy, account):
-    from copublisher.core import InstagramPublishTask
+    from copublisher.domain.tasks import InstagramPublishTask
     return InstagramPublishTask.from_json(video_path, script_data)
 
 
