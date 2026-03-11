@@ -33,6 +33,8 @@ class EpisodeAdapter:
     遵循「不做自动推断」原则，所有字段从 JSON 显式读取。
     """
     
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
     def __init__(self, ep_json_path: str | Path):
         """
         加载 ep*.json 文件
@@ -44,6 +46,12 @@ class EpisodeAdapter:
         if not self.path.exists():
             raise FileNotFoundError(f"ep*.json 文件不存在: {self.path}")
         
+        file_size = self.path.stat().st_size
+        if file_size > self.MAX_FILE_SIZE:
+            raise ValueError(
+                f"ep*.json 文件过大: {file_size} bytes (上限 {self.MAX_FILE_SIZE} bytes)"
+            )
+
         with open(self.path, 'r', encoding='utf-8') as f:
             self.data = json.load(f)
         

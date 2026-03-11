@@ -7,70 +7,74 @@ YouTube Shorts 发布核心模块
 import logging
 import os
 import socket
+import time
 from pathlib import Path
 from typing import Optional, Callable, Tuple
-from copublisher.shared.io import atomic_write_text
-
-DEFAULT_PROXY_HOST = "127.0.0.1"
-DEFAULT_PROXY_PORT = 7890
-
-
-def _setup_proxy(logger_obj: Optional[logging.Logger] = None):
-    """在调用点设置代理环境变量（禁止模块导入时副作用）。"""
-    proxy_host = os.environ.get('PROXY_HOST', DEFAULT_PROXY_HOST)
-    proxy_port = os.environ.get('PROXY_PORT', str(DEFAULT_PROXY_PORT))
-    use_proxy = os.environ.get('USE_PROXY', 'true').lower() == 'true'
-    
-    if use_proxy:
-        proxy_url = f"http://{proxy_host}:{proxy_port}"
-        os.environ['HTTP_PROXY'] = proxy_url
-        os.environ['HTTPS_PROXY'] = proxy_url
-        os.environ['http_proxy'] = proxy_url
-        os.environ['https_proxy'] = proxy_url
-        if logger_obj:
-            logger_obj.info("YouTube 模块已设置代理环境变量: %s", proxy_url)
 
 import httplib2
 import requests
-from google.auth.transport.requests import Request, AuthorizedSession
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+from .base import Publisher, YouTubePublishTask
+from copublisher.shared.io import atomic_write_text
+from copublisher.shared.config import find_config_file
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_PROXY_HOST = "127.0.0.1"
+DEFAULT_PROXY_PORT = 7890
+
+SCOPES = [
+    'https://www.googleapis.com/auth/youtube.upload',
+    'https://www.googleapis.com/auth/youtube',
+]
+API_SERVICE_NAME = 'youtube'
+API_VERSION = 'v3'
+
+_UPLOAD_TIMEOUT = 1800  # 30 minutes
+
+
+def _resolve_proxy_url() -> str:
+    """Return the proxy URL for YouTube if USE_PROXY is enabled, else ''."""
+    use_proxy = os.environ.get('USE_PROXY', 'true').lower() == 'true'
+    if not use_proxy:
+        return ""
+    host = os.environ.get('PROXY_HOST', DEFAULT_PROXY_HOST)
+    port = os.environ.get('PROXY_PORT', str(DEFAULT_PROXY_PORT))
+    return f"http://{host}:{port}"
+
 
 class RequestsHttpAdapter:
     """
-    使用 requests 库的 httplib2.Http 兼容适配器。
-    requests 会自动读取 HTTP_PROXY/HTTPS_PROXY 环境变量。
+    httplib2.Http-compatible adapter backed by ``requests.Session``.
+
+    All proxy and timeout configuration is scoped to the session —
+    no global ``os.environ`` or ``socket.setdefaulttimeout`` mutation.
     """
-    
-    def __init__(self, credentials=None, timeout=1800):
+
+    def __init__(self, credentials=None, timeout: int = _UPLOAD_TIMEOUT, proxy_url: str = ""):
         self.credentials = credentials
         self.timeout = timeout
         self.session = requests.Session()
-        
-        # 从环境变量读取代理（requests 会自动使用，但我们显式设置确保生效）
-        proxy_url = os.environ.get('HTTPS_PROXY', os.environ.get('HTTP_PROXY', ''))
+
         if proxy_url:
-            self.session.proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-    
+            self.session.proxies = {'http': proxy_url, 'https': proxy_url}
+
     def request(self, uri, method="GET", body=None, headers=None,
                 redirections=5, connection_type=None):
-        """模拟 httplib2.Http.request 接口"""
         if headers is None:
             headers = {}
-        
-        # 添加认证头
+
         if self.credentials:
             if self.credentials.expired and self.credentials.refresh_token:
                 self.credentials.refresh(Request())
             headers['Authorization'] = f'Bearer {self.credentials.token}'
-        
+
         try:
             response = self.session.request(
                 method=method,
@@ -78,34 +82,18 @@ class RequestsHttpAdapter:
                 data=body,
                 headers=headers,
                 timeout=self.timeout,
-                allow_redirects=(redirections > 0)
+                allow_redirects=(redirections > 0),
             )
-            
-            # 构造 httplib2 兼容的响应对象
+
             resp = httplib2.Response(response.headers)
             resp.status = response.status_code
             resp['status'] = str(response.status_code)
-            
             return resp, response.content
-            
+
         except requests.exceptions.Timeout as e:
             raise socket.timeout(str(e))
         except requests.exceptions.RequestException as e:
             raise socket.error(str(e))
-
-from .base import Publisher, YouTubePublishTask
-
-# Configure logging
-logger = logging.getLogger(__name__)
-
-# YouTube API 配置
-# 需要 upload 权限上传视频，需要 youtube 权限管理播放列表
-SCOPES = [
-    'https://www.googleapis.com/auth/youtube.upload',  # 上传视频
-    'https://www.googleapis.com/auth/youtube',          # 管理播放列表、视频等
-]
-API_SERVICE_NAME = 'youtube'
-API_VERSION = 'v3'
 
 
 class YouTubePublisher(Publisher):
@@ -121,46 +109,11 @@ class YouTubePublisher(Publisher):
         token_path: str = "config/youtube_token.json",
         log_callback: Optional[Callable[[str], None]] = None
     ):
-        """
-        初始化发布器
-        
-        Args:
-            credentials_path: OAuth2 凭据文件路径
-            token_path: OAuth2 令牌文件路径
-            log_callback: 日志回调函数
-        """
         super().__init__(log_callback)
-        
-        # 查找配置文件：先尝试相对路径，然后尝试从父目录查找
-        self.credentials_path = self._find_config_file(credentials_path)
-        # token 路径使用与 credentials 相同的目录
+        self.credentials_path = find_config_file(credentials_path)
         self.token_path = self.credentials_path.parent / Path(token_path).name
         self.credentials: Optional[Credentials] = None
         self.youtube = None
-    
-    def _find_config_file(self, config_path: str) -> Path:
-        """
-        查找配置文件，支持多个可能的位置
-        
-        Args:
-            config_path: 配置文件相对路径
-            
-        Returns:
-            配置文件的绝对路径
-        """
-        # 尝试多个可能的位置
-        possible_paths = [
-            Path(config_path),  # 当前目录
-            Path.cwd() / config_path,  # 工作目录
-            Path.cwd().parent / config_path,  # 父目录（copublisher 的父目录）
-        ]
-        
-        for path in possible_paths:
-            if path.exists():
-                return path
-        
-        # 如果都不存在，返回第一个路径（会在后续抛出错误）
-        return Path(config_path)
 
     def authenticate(self):
         """
@@ -168,11 +121,9 @@ class YouTubePublisher(Publisher):
         
         如果令牌存在且有效，则使用它。否则运行 OAuth 流程。
         """
-        # 在入口调用点设置代理，避免模块导入时产生全局副作用。
-        _setup_proxy(logger)
+        proxy_url = _resolve_proxy_url()
         creds = None
         
-        # 加载现有令牌
         if self.token_path.exists():
             try:
                 creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
@@ -180,7 +131,6 @@ class YouTubePublisher(Publisher):
             except Exception as e:
                 self._log(f"从令牌文件加载凭据失败: {e}", "WARNING")
 
-        # 如果没有有效凭据，让用户登录
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 self._log("正在刷新过期的凭据...")
@@ -207,8 +157,6 @@ class YouTubePublisher(Publisher):
                 self._log("开始 OAuth2 授权流程...")
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self.credentials_path), SCOPES)
-                # 使用固定端口 8080 - 确保在 Google Cloud Console 中添加 
-                # http://localhost:8080/ 作为授权重定向 URI
                 try:
                     creds = flow.run_local_server(port=8080, open_browser=True)
                 except OSError as e:
@@ -236,51 +184,33 @@ class YouTubePublisher(Publisher):
                     raise
                 self._log("OAuth2 认证成功")
 
-            # 保存凭据供下次运行使用
             self.token_path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(self.token_path, creds.to_json())
+            atomic_write_text(self.token_path, creds.to_json(), mode=0o600)
             self._log(f"凭据已保存到 {self.token_path}")
 
         self.credentials = creds
         
-        # 设置 socket 默认超时（30分钟，适合大文件上传）
-        socket.setdefaulttimeout(1800)  # 30分钟
-        
-        # 检查代理配置
-        proxy_url = os.environ.get('HTTPS_PROXY', '')
-        use_proxy = os.environ.get('USE_PROXY', 'true').lower() == 'true'
-        
-        if use_proxy and proxy_url:
-            self._log(f"🌐 使用代理: {proxy_url} (通过 requests 库)")
+        if proxy_url:
+            self._log(f"使用代理: {proxy_url} (通过 requests 库)")
         else:
-            self._log("🌐 直连模式（未使用代理）")
+            self._log("直连模式（未使用代理）")
         
-        # 使用自定义的 requests 适配器（正确支持代理）
-        http_adapter = RequestsHttpAdapter(credentials=creds, timeout=1800)
+        http_adapter = RequestsHttpAdapter(
+            credentials=creds, timeout=_UPLOAD_TIMEOUT, proxy_url=proxy_url,
+        )
         
-        # 使用带代理支持的 HTTP 适配器构建 API
         self.youtube = build(
             API_SERVICE_NAME, 
             API_VERSION, 
-            http=http_adapter
+            http=http_adapter,
         )
         self._log("YouTube API 客户端初始化完成（上传超时: 30分钟）")
 
     def find_or_create_playlist(self, playlist_title: str) -> str:
-        """
-        查找或创建播放列表
-        
-        Args:
-            playlist_title: 播放列表标题
-            
-        Returns:
-            播放列表 ID
-        """
         if not self.youtube:
             raise RuntimeError("未认证。请先调用 authenticate()")
         
         try:
-            # 搜索现有播放列表
             self._log(f"搜索播放列表: {playlist_title}")
             request = self.youtube.playlists().list(
                 part="snippet",
@@ -289,14 +219,12 @@ class YouTubePublisher(Publisher):
             )
             response = request.execute()
             
-            # 检查播放列表是否存在
             for item in response.get('items', []):
                 if item['snippet']['title'] == playlist_title:
                     playlist_id = item['id']
                     self._log(f"找到现有播放列表: {playlist_title} (ID: {playlist_id})")
                     return playlist_id
             
-            # 如果未找到，创建新播放列表
             self._log(f"播放列表未找到。创建新播放列表: {playlist_title}")
             request = self.youtube.playlists().insert(
                 part="snippet,status",
@@ -320,13 +248,6 @@ class YouTubePublisher(Publisher):
             raise
 
     def add_video_to_playlist(self, video_id: str, playlist_id: str):
-        """
-        将视频添加到播放列表
-        
-        Args:
-            video_id: YouTube 视频 ID
-            playlist_id: YouTube 播放列表 ID
-        """
         if not self.youtube:
             raise RuntimeError("未认证。请先调用 authenticate()")
         
@@ -344,7 +265,7 @@ class YouTubePublisher(Publisher):
                     }
                 }
             )
-            response = request.execute()
+            request.execute()
             self._log("成功将视频添加到播放列表")
             
         except HttpError as e:
@@ -352,15 +273,6 @@ class YouTubePublisher(Publisher):
             raise
 
     def publish(self, task: YouTubePublishTask) -> Tuple[bool, Optional[str]]:
-        """
-        上传视频到 YouTube 作为 Short
-        
-        Args:
-            task: YouTube 发布任务
-            
-        Returns:
-            (success, video_url) - 成功状态和视频 URL
-        """
         try:
             task.validate()
         except Exception as e:
@@ -368,14 +280,12 @@ class YouTubePublisher(Publisher):
             return False, None
 
         if not self.youtube:
-            error_msg = "未认证。请先调用 authenticate()"
-            self._log(error_msg, "ERROR")
+            self._log("未认证。请先调用 authenticate()", "ERROR")
             return False, None
 
         try:
             self._log(f"正在上传视频: {task.video_path}")
             
-            # 准备视频元数据
             body = {
                 'snippet': {
                     'title': task.title,
@@ -389,61 +299,53 @@ class YouTubePublisher(Publisher):
                 }
             }
 
-            # 创建媒体上传对象（使用 2MB chunk size 以便更频繁地显示进度）
             media = MediaFileUpload(
                 str(task.video_path),
-                chunksize=2 * 1024 * 1024,  # 2MB chunks - 更频繁的进度更新
+                chunksize=2 * 1024 * 1024,
                 resumable=True,
                 mimetype='video/*'
             )
 
-            # 插入视频
             insert_request = self.youtube.videos().insert(
                 part=','.join(body.keys()),
                 body=body,
                 media_body=media
             )
 
-            # 执行上传并跟踪进度
             response = None
             error = None
             retry = 0
             last_progress = -1
             
-            # 获取文件大小用于显示
-            import os
             file_size_mb = os.path.getsize(task.video_path) / (1024 * 1024)
-            self._log(f"📤 开始上传 {file_size_mb:.1f} MB 文件...")
+            self._log(f"开始上传 {file_size_mb:.1f} MB 文件...")
             
             while response is None:
                 try:
                     status, response = insert_request.next_chunk()
                     
-                    # 显示上传进度（每次 chunk 完成都显示）
                     if status:
                         progress = int(status.progress() * 100)
                         if progress != last_progress:
                             uploaded_mb = file_size_mb * status.progress()
-                            self._log(f"📊 上传进度: {progress}% ({uploaded_mb:.1f}/{file_size_mb:.1f} MB)")
+                            self._log(f"上传进度: {progress}% ({uploaded_mb:.1f}/{file_size_mb:.1f} MB)")
                             last_progress = progress
                     
                     if response is not None:
                         if 'id' in response:
                             video_id = response['id']
                             video_url = f"https://www.youtube.com/watch?v={video_id}"
-                            self._log(f"✅ 视频上传成功！")
+                            self._log("视频上传成功！")
                             self._log(f"视频 ID: {video_id}")
                             self._log(f"视频 URL: {video_url}")
                             
-                            # 如果指定了播放列表，添加到播放列表
                             if task.playlist_title:
                                 try:
                                     playlist_id = self.find_or_create_playlist(task.playlist_title)
                                     self.add_video_to_playlist(video_id, playlist_id)
-                                    self._log(f"✅ 已将视频添加到播放列表: {task.playlist_title}")
+                                    self._log(f"已将视频添加到播放列表: {task.playlist_title}")
                                 except Exception as e:
                                     self._log(f"添加视频到播放列表失败: {e}", "WARNING")
-                                    # 不要因为播放列表操作失败而使整个上传失败
                             
                             return True, video_url
                         else:
@@ -455,42 +357,37 @@ class YouTubePublisher(Publisher):
                         error = f"可重试的 HTTP 错误 {e.resp.status}:\n{e.content}"
                         self._log(error, "WARNING")
                         retry += 1
-                        if retry > 5:  # 增加到5次重试
+                        if retry > 5:
                             error_msg = f"上传失败，已重试 {retry} 次: {error}"
                             self._log(error_msg, "ERROR")
                             return False, None
                         self._log(f"等待 5 秒后重试 (第 {retry} 次)...")
-                        import time
                         time.sleep(5)
                     else:
                         error_msg = f"HTTP 错误 {e.resp.status}:\n{e.content}"
                         self._log(error_msg, "ERROR")
                         return False, None
                 except (socket.timeout, socket.error, TimeoutError, OSError) as e:
-                    # 处理网络超时和连接错误
                     error = f"网络错误: {e}"
                     self._log(error, "WARNING")
                     retry += 1
                     
-                    # 检查是否是连接超时（通常意味着需要 VPN）
                     error_str = str(e).lower()
                     if "timed out" in error_str or "operation timed out" in error_str:
                         if retry == 1:
-                            self._log("💡 提示: 如果持续超时，请检查：", "WARNING")
+                            self._log("提示: 如果持续超时，请检查：", "WARNING")
                             self._log("   1. 是否需要开启 VPN/代理访问 YouTube", "WARNING")
                             self._log("   2. 检查网络连接是否稳定", "WARNING")
                             self._log("   3. 环境变量 HTTP_PROXY/HTTPS_PROXY 是否正确设置", "WARNING")
                     
-                    if retry > 10:  # 增加到 10 次重试
+                    if retry > 10:
                         error_msg = f"上传失败，已重试 {retry} 次: {error}"
                         self._log(error_msg, "ERROR")
-                        self._log("❌ 建议：请确认 VPN/代理已开启并能访问 YouTube", "ERROR")
+                        self._log("建议：请确认 VPN/代理已开启并能访问 YouTube", "ERROR")
                         return False, None
                     
-                    # 指数退避：5s, 10s, 15s, 20s...
                     wait_time = min(5 * retry, 30)
-                    self._log(f"⏳ 等待 {wait_time} 秒后重试 (第 {retry}/10 次)...")
-                    import time
+                    self._log(f"等待 {wait_time} 秒后重试 (第 {retry}/10 次)...")
                     time.sleep(wait_time)
 
         except HttpError as e:
@@ -503,11 +400,8 @@ class YouTubePublisher(Publisher):
             return False, None
 
     def __enter__(self):
-        """上下文管理器入口"""
         self.authenticate()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """上下文管理器出口"""
-        # YouTube API 客户端不需要清理
         pass

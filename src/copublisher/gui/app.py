@@ -21,24 +21,28 @@ class PublisherApp:
     """发布工具应用"""
     
     def __init__(self):
-        self.logs = []
+        self._lock = threading.Lock()
+        self.logs: List[str] = []
         self.is_publishing = False
         self.publish_usecase = PublishContentUseCase(log_callback=self.add_log)
         self.current_episode_path: Optional[Path] = None
     
     def add_log(self, message: str):
-        """添加日志"""
-        self.logs.append(message)
-        if len(self.logs) > 200:
-            self.logs = self.logs[-200:]
+        """添加日志（线程安全）"""
+        with self._lock:
+            self.logs.append(message)
+            if len(self.logs) > 200:
+                self.logs = self.logs[-200:]
     
     def get_logs(self) -> str:
-        """获取所有日志"""
-        return "\n".join(self.logs)
+        """获取所有日志（线程安全）"""
+        with self._lock:
+            return "\n".join(self.logs)
     
     def clear_logs(self):
-        """清空日志"""
-        self.logs = []
+        """清空日志（线程安全）"""
+        with self._lock:
+            self.logs.clear()
     
     def close_browser(self) -> str:
         """关闭微信浏览器"""

@@ -12,6 +12,7 @@ from typing import Optional, Callable, Tuple
 import requests
 
 from .base import Publisher, DevToPublishTask
+from copublisher.shared.config import find_config_file
 
 logger = logging.getLogger(__name__)
 
@@ -39,21 +40,9 @@ class DevToPublisher(Publisher):
             log_callback: 日志回调函数
         """
         super().__init__(log_callback)
-        self.api_key_path = self._find_config_file(api_key_path)
+        self.api_key_path = find_config_file(api_key_path)
         self.api_key: Optional[str] = None
         self.username: Optional[str] = None
-    
-    def _find_config_file(self, config_path: str) -> Path:
-        """查找配置文件"""
-        possible_paths = [
-            Path(config_path),
-            Path.cwd() / config_path,
-            Path.cwd().parent / config_path,
-        ]
-        for path in possible_paths:
-            if path.exists():
-                return path
-        return Path(config_path)
     
     def authenticate(self):
         """

@@ -170,23 +170,55 @@ config/youtube_token.json        # 访问令牌（自动生成）
 
 ```
 copublisher/
-├── pyproject.toml              # 项目配置
-├── README.md                   # 说明文档
-├── verify_install.py           # 安装验证脚本
+├── pyproject.toml                  # 项目配置 (hatchling)
+├── README.md
 ├── src/
 │   └── copublisher/
-│       ├── __init__.py         # 模块入口
-│       ├── __main__.py         # 命令行入口
-│       ├── core/
-│       │   ├── base.py         # 发布器基类和接口
-│       │   ├── wechat.py       # 微信视频号发布器
-│       │   └── youtube.py      # YouTube 发布器
-│       └── gui/
-│           └── app.py          # Gradio GUI
+│       ├── __init__.py             # 包入口（lazy export）
+│       ├── __main__.py             # CLI 入口 + 参数解析
+│       ├── domain/                 # 领域模型
+│       │   ├── models.py           #   JobSpec
+│       │   ├── result.py           #   RunResult / PlatformRunOutcome
+│       │   └── error_codes.py      #   ErrorCode 枚举 + 重试策略
+│       ├── application/            # 应用层 (UseCase + 服务)
+│       │   ├── usecases/
+│       │   │   ├── publish_content.py  # PublishContentUseCase
+│       │   │   └── run_job.py          # RunJobUseCase
+│       │   └── services/
+│       │       ├── idempotency_service.py
+│       │       ├── result_builder.py
+│       │       ├── org_run_reporter.py
+│       │       └── blue_ocean_adapter.py
+│       ├── infrastructure/         # 基础设施层
+│       │   ├── registry.py         #   PublisherRegistry + build_default_registry
+│       │   ├── publishers/
+│       │   │   ├── executor.py     #   LegacyPlatformExecutor (Registry 驱动)
+│       │   │   └── legacy.py       #   GenericPublisherAdapter
+│       │   └── state_store/
+│       │       └── json_store.py   #   ExecutionStateStore
+│       ├── core/                   # 核心发布模块
+│       │   ├── base.py             #   Platform 枚举 + PublishTask + Publisher ABC
+│       │   ├── adapter.py          #   EpisodeAdapter
+│       │   ├── browser.py          #   PlaywrightBrowser
+│       │   ├── wechat.py           #   WeChatPublisher (组合 PlaywrightBrowser)
+│       │   ├── youtube.py          #   YouTubePublisher
+│       │   ├── medium.py / twitter.py / devto.py / tiktok.py / instagram.py
+│       │   ├── gzh.py / gzh_video.py / gzh_drafts.py
+│       │   └── ...
+│       ├── interfaces/cli/         # CLI 接口层
+│       │   ├── job_command.py
+│       │   ├── job_runner.py
+│       │   └── workflows.py
+│       ├── gui/                    # Gradio GUI
+│       │   └── app.py
+│       └── shared/                 # 共享工具
+│           ├── io.py               #   atomic_write_text / atomic_write_json
+│           ├── security.py         #   sanitize_identifier
+│           └── config.py           #   find_config_file
+├── tests/                          # 测试
 ├── examples/
-│   ├── README.md               # 示例说明
 │   └── publish_lesson_example.py
-└── docs/                       # 文档
+└── docs/
 ```
 
 ## 📦 集成到其他项目

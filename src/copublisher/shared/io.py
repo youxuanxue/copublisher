@@ -11,8 +11,21 @@ from pathlib import Path
 from typing import Any
 
 
-def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -> None:
-    """Write text atomically via temp file + rename."""
+def atomic_write_text(
+    path: str | Path,
+    content: str,
+    encoding: str = "utf-8",
+    mode: int | None = None,
+) -> None:
+    """Write text atomically via temp file + rename.
+
+    Args:
+        path: Target file path.
+        content: Text to write.
+        encoding: Text encoding (default utf-8).
+        mode: If set, ``os.chmod(target, mode)`` after rename.
+              Use ``0o600`` for credential/token files.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -29,12 +42,26 @@ def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -
             tmp_file.flush()
             os.fsync(tmp_file.fileno())
         os.replace(tmp_path, target)
+        if mode is not None:
+            os.chmod(target, mode)
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
 
 
-def atomic_write_json(path: str | Path, payload: Any, ensure_ascii: bool = False) -> None:
-    """Serialize JSON and write atomically."""
+def atomic_write_json(
+    path: str | Path,
+    payload: Any,
+    ensure_ascii: bool = False,
+    mode: int | None = None,
+) -> None:
+    """Serialize JSON and write atomically.
+
+    Args:
+        path: Target file path.
+        payload: JSON-serializable object.
+        ensure_ascii: Passed to ``json.dumps``.
+        mode: Forwarded to ``atomic_write_text`` (e.g. ``0o600``).
+    """
     text = json.dumps(payload, ensure_ascii=ensure_ascii, indent=2)
-    atomic_write_text(path, text)
+    atomic_write_text(path, text, mode=mode)

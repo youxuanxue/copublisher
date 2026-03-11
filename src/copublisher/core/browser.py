@@ -152,7 +152,7 @@ class PlaywrightBrowser:
         """保存浏览器认证状态到文件"""
         if self._context:
             state = self._context.storage_state()
-            atomic_write_json(self.auth_file_path, state)
+            atomic_write_json(self.auth_file_path, state, mode=0o600)
             self._log(f"登录状态已保存: {self.auth_file_path}")
 
     def __enter__(self):
